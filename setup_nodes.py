@@ -24,7 +24,7 @@ def setup_node(node: str, ssh_user: str = "root") -> bool:
         
         for cmd in commands:
             print(f"  [*] Attempting: {cmd.split('&&')[0] if '&&' in cmd else 'install command'}")
-            result = subprocess.run(cmd, shell=True, capture_output=True, timeout=60)
+            result = subprocess.run(cmd, shell=True, capture_output=True, timeout=60, text=True)
             if result.returncode == 0 or "already" in result.stderr.lower():
                 print(f"  [✓] iperf3 installed on {node}")
                 return True
