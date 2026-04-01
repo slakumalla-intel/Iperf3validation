@@ -22,10 +22,10 @@ Expected output: `Python 3.7.0` or higher
 Open PowerShell and test each node:
 
 ```powershell
-ssh root@200.0.0.101 "hostname"
-ssh root@200.0.0.103 "hostname"
-ssh root@200.0.0.104 "hostname"
-ssh root@200.0.0.106 "hostname"
+ssh root@220.0.0.101 "hostname"
+ssh root@220.0.0.103 "hostname"
+ssh root@220.0.0.104 "hostname"
+ssh root@220.0.0.106 "hostname"
 ```
 
 If prompts for password, configure SSH keys (skip to end of this guide for help).
@@ -61,10 +61,10 @@ type bottleneck_analysis.txt | more
 Your 4-node system will be tested in this pattern:
 
 ```
-Node 101 → Node 103, Node 104, Node 106
-Node 103 → Node 101, Node 104, Node 106
-Node 104 → Node 101, Node 103, Node 106
-Node 106 → Node 101, Node 103, Node 104
+Node 220.0.0.101 → Node 220.0.0.103, Node 220.0.0.104, Node 220.0.0.106
+Node 220.0.0.103 → Node 220.0.0.101, Node 220.0.0.104, Node 220.0.0.106
+Node 220.0.0.104 → Node 220.0.0.101, Node 220.0.0.103, Node 220.0.0.106
+Node 220.0.0.106 → Node 220.0.0.101, Node 220.0.0.103, Node 220.0.0.104
 
 Total: 12 bidirectional test paths
 ```
@@ -80,20 +80,20 @@ Each test:
 ```
 ================================================================================
 [*] Checking node connectivity...
-  ✓ 200.0.0.101 is reachable
-  ✓ 200.0.0.103 is reachable
-  ✓ 200.0.0.104 is reachable
-  ✓ 200.0.0.106 is reachable
+  ✓ 220.0.0.101 is reachable
+  ✓ 220.0.0.103 is reachable
+  ✓ 220.0.0.104 is reachable
+  ✓ 220.0.0.106 is reachable
 
 [*] Starting iperf3 servers on all nodes...
-  [*] Starting iperf3 server on 200.0.0.101:5201
-  [*] Starting iperf3 server on 200.0.0.103:5201
+  [*] Starting iperf3 server on 220.0.0.101:5201
+  [*] Starting iperf3 server on 220.0.0.103:5201
   ...
 
 [*] Running bandwidth tests between all pairs...
-  [→] Testing 200.0.0.101 → 200.0.0.103
+  [→] Testing 220.0.0.101 → 220.0.0.103
     [✓] 45.23 Gbps, CPU: 32.1% (client)
-  [→] Testing 200.0.0.101 → 200.0.0.104
+  [→] Testing 220.0.0.101 → 220.0.0.104
     [✓] 48.15 Gbps, CPU: 35.8% (client)
   ...
 
@@ -139,7 +139,7 @@ CPU UTILIZATION ANALYSIS
 
 ```
 LINK SATURATION ANALYSIS
-  Path 200.0.0.101 → 200.0.0.103: 98.5% saturation
+  Path 220.0.0.101 → 220.0.0.103: 98.5% saturation
   Throughput: 98.50 Gbps (approaching NIC limit)
 ```
 
@@ -156,10 +156,10 @@ LINK SATURATION ANALYSIS
 
 ```powershell
 # Test ping
-ping 200.0.0.101
+ping 220.0.0.101
 
 # Test SSH manually
-ssh root@200.0.0.101 echo test
+ssh root@220.0.0.101 echo test
 ```
 
 ### Issue: SSH hangs or times out
@@ -167,7 +167,7 @@ ssh root@200.0.0.101 echo test
 **Solution**: Configure SSH with timeout and connection settings
 
 ```powershell
-ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@200.0.0.101 "echo test"
+ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@220.0.0.101 "echo test"
 ```
 
 ### Issue: "iperf3: command not found"
@@ -180,10 +180,10 @@ python setup_nodes.py
 
 # Or manually on each node:
 # For Ubuntu/Debian:
-ssh root@200.0.0.101 "apt-get update && apt-get install -y iperf3"
+ssh root@220.0.0.101 "apt-get update && apt-get install -y iperf3"
 
 # For CentOS/RHEL:
-ssh root@200.0.0.101 "yum install -y iperf3"
+ssh root@220.0.0.101 "yum install -y iperf3"
 ```
 
 ### Issue: Very low throughput (< 10 Gbps)
@@ -193,7 +193,7 @@ ssh root@200.0.0.101 "yum install -y iperf3"
 1. Verify network cables are connected properly
 2. Check port status on switch: `ssh admin@switch "show port status 1/1"`
 3. Verify speed negotiation: Check both ends are 100GbE
-4. Check for errors: `ssh root@200.0.0.101 "ethtool eth0 | grep -i speed"`
+4. Check for errors: `ssh root@220.0.0.101 "ethtool eth0 | grep -i speed"`
 
 ### Issue: Results vary significantly between runs
 
@@ -205,7 +205,7 @@ ssh root@200.0.0.101 "yum install -y iperf3"
 
 **Solution:**
 - Run tests during off-peak hours
-- Stop unnecessary services: `ssh root@200.0.0.101 "systemctl stop [service]"`
+- Stop unnecessary services: `ssh root@220.0.0.101 "systemctl stop [service]"`
 - Increase test duration for more stable average
 
 ## Customization
@@ -278,9 +278,9 @@ After getting results:
 
 For issues:
 
-1. Check that all nodes are reachable: `ping 200.0.0.10X`
-2. Verify iperf3 is installed: `ssh root@200.0.0.101 iperf3 -v`
-3. Check SSH configuration: `ssh root@200.0.0.101 echo "Test"`
+1. Check that all nodes are reachable: `ping 220.0.0.10X`
+2. Verify iperf3 is installed: `ssh root@220.0.0.101 iperf3 -v`
+3. Check SSH configuration: `ssh root@220.0.0.101 echo "Test"`
 4. Review error messages in console output
 5. Check generated JSON file for raw data
 
@@ -297,3 +297,4 @@ This will automatically:
 2. Run all tests (takes ~12-15 minutes for 12 paths × 5 min)
 3. Generate comprehensive reports
 4. Identify bottlenecks and provide recommendations
+

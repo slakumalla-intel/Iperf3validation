@@ -53,7 +53,7 @@ def verify_iperf3(node: str, ssh_user: str = "root") -> bool:
         return False
 
 def main():
-    nodes = ["200.0.0.101", "200.0.0.103", "200.0.0.104", "200.0.0.106"]
+    nodes = ["220.0.0.101", "220.0.0.103", "220.0.0.104", "220.0.0.106"]
     ssh_user = "root"
     
     print("=" * 60)

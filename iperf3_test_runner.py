@@ -378,7 +378,7 @@ class Iperf3Tester:
 
 def main():
     # Node configuration
-    nodes = ["200.0.0.101", "200.0.0.103", "200.0.0.104", "200.0.0.106"]
+    nodes = ["220.0.0.101", "220.0.0.103", "220.0.0.104", "220.0.0.106"]
     
     # Test parameters
     duration = 300  # 5 minutes per test

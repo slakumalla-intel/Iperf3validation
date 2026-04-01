@@ -2,7 +2,7 @@
 
 ## What's Included
 
-This is a complete, production-ready iperf3 testing framework for your 4-node rack system (200.0.0.101, 200.0.0.103, 200.0.0.104, 200.0.0.106).
+This is a complete, production-ready iperf3 testing framework for your 4-node rack system (220.0.0.101, 220.0.0.103, 220.0.0.104, 220.0.0.106).
 
 ### Core Components
 
@@ -45,7 +45,7 @@ requirements.txt            - Python dependencies (none!)
 
 ### Step 1: Verify SSH Access
 ```powershell
-ssh root@200.0.0.101 "echo Test"
+ssh root@220.0.0.101 "echo Test"
 ```
 
 ### Step 2: Run Full Test Suite
@@ -79,10 +79,10 @@ That's it! You'll get:
 ### Phase 4: Bandwidth Testing (30-45 minutes)
 Tests all node pairs:
 ```
-200.0.0.101 → 103, 104, 106     (3 tests)
-200.0.0.103 → 101, 104, 106     (3 tests)
-200.0.0.104 → 101, 103, 106     (3 tests)
-200.0.0.106 → 101, 103, 104     (3 tests)
+220.0.0.101 → 103, 104, 106     (3 tests)
+220.0.0.103 → 101, 104, 106     (3 tests)
+220.0.0.104 → 101, 103, 106     (3 tests)
+220.0.0.106 → 101, 103, 104     (3 tests)
                           TOTAL: 12 tests
 ```
 
@@ -117,14 +117,14 @@ CPU UTILIZATION
   Server Peak: 52.4%
 
 PER-NODE STATISTICS
-  200.0.0.101 sent: avg 45.2 Gbps, min 38.1, max 52.3
-  200.0.0.101 recv: avg 47.8 Gbps, min 40.5, max 55.2
+  220.0.0.101 sent: avg 45.2 Gbps, min 38.1, max 52.3
+  220.0.0.101 recv: avg 47.8 Gbps, min 40.5, max 55.2
   ... (for all 4 nodes)
 
 DETAILED RESULTS
 Source          Dest            Throughput      CPU Client    CPU Server
-200.0.0.101     200.0.0.103      45.23 Gbps      32.1%         28.5%
-200.0.0.101     200.0.0.104      48.15 Gbps      35.8%         31.2%
+220.0.0.101     220.0.0.103      45.23 Gbps      32.1%         28.5%
+220.0.0.101     220.0.0.104      48.15 Gbps      35.8%         31.2%
 ... (all 12 paths)
 ```
 
@@ -296,7 +296,7 @@ Iperf3validation/
 
 1. **Verify you can SSH to nodes**
    ```powershell
-   ssh root@200.0.0.101 "echo ready"
+   ssh root@220.0.0.101 "echo ready"
    ```
 
 2. **Run the complete test suite**
@@ -322,3 +322,4 @@ That's all! You now have comprehensive network performance data for your 4-node 
 **Framework Version**: 1.0
 **Python Version**: 3.7+
 **iperf3 Version**: 3.x+
+

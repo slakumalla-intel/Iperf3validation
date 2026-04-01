@@ -7,7 +7,7 @@ Comprehensive network performance testing framework for rack systems with detail
 This suite tests bandwidth performance between all node pairs in a multi-node system, analyzes CPU utilization, and identifies network bottlenecks.
 
 **Configuration:**
-- **4 Nodes**: 200.0.0.101, 200.0.0.103, 200.0.0.104, 200.0.0.106
+- **4 Nodes**: 220.0.0.101, 220.0.0.103, 220.0.0.104, 220.0.0.106
 - **Cores per node**: 160 cores
 - **Test protocol**: TCP (bidirectional)
 - **Parallel streams**: 16 (tuned for 160-core systems)
@@ -46,10 +46,10 @@ Ensure you can SSH to all nodes without password prompts:
 # Default: root
 
 # Test SSH access
-ssh root@200.0.0.101 "echo 'SSH works'"
-ssh root@200.0.0.103 "echo 'SSH works'"
-ssh root@200.0.0.104 "echo 'SSH works'"
-ssh root@200.0.0.106 "echo 'SSH works'"
+ssh root@220.0.0.101 "echo 'SSH works'"
+ssh root@220.0.0.103 "echo 'SSH works'"
+ssh root@220.0.0.104 "echo 'SSH works'"
+ssh root@220.0.0.106 "echo 'SSH works'"
 ```
 
 ### 2. Setup Nodes (Optional)
@@ -108,7 +108,7 @@ CPU UTILIZATION ANALYSIS
   Max Server CPU:      52.4%
 
 BOTTLENECK ANALYSIS
-  [1] Path: 200.0.0.101 → 200.0.0.103
+  [1] Path: 220.0.0.101 → 220.0.0.103
       Throughput: 38.45 Gbps
       Degradation: 15.8%
 ```
@@ -121,8 +121,8 @@ Detailed diagnosis with recommendations:
 [LINK SATURATION ANALYSIS]
 Assuming 100GbE NIC per node (theoretical max: 100.00 Gbps)
 
-🟢 OK    200.0.0.101 → 200.0.0.103:   45.67 Gbps (45.7% saturation)
-🟡 HIGH  200.0.0.101 → 200.0.0.104:   82.30 Gbps (82.3% saturation)
+🟢 OK    220.0.0.101 → 220.0.0.103:   45.67 Gbps (45.7% saturation)
+🟡 HIGH  220.0.0.101 → 220.0.0.104:   82.30 Gbps (82.3% saturation)
 ```
 
 ### JSON Results (iperf3_results_*.json)
@@ -132,8 +132,8 @@ Raw data for custom analysis:
 ```json
 [
   {
-    "source": "200.0.0.101",
-    "destination": "200.0.0.103",
+    "source": "220.0.0.101",
+    "destination": "220.0.0.103",
     "throughput_gbps": 45.67,
     "throughput_mbps": 45670.00,
     "cpu_client": 25.3,
@@ -181,7 +181,7 @@ Edit `iperf3_test_runner.py` in the `main()` function:
 
 ```python
 def main():
-    nodes = ["200.0.0.101", "200.0.0.103", "200.0.0.104", "200.0.0.106"]
+    nodes = ["220.0.0.101", "220.0.0.103", "220.0.0.104", "220.0.0.106"]
     
     duration = 600    # Increase test duration (seconds)
     threads = 32      # Increase parallel streams for more cores
@@ -210,13 +210,13 @@ self.ssh_key = "/home/user/.ssh/id_rsa"  # Path to private key
 
 ```bash
 # Check network connectivity
-ping 200.0.0.101
-ping 200.0.0.103
-ping 200.0.0.104
-ping 200.0.0.106
+ping 220.0.0.101
+ping 220.0.0.103
+ping 220.0.0.104
+ping 220.0.0.106
 
 # Check SSH access
-ssh root@200.0.0.101 "hostname"
+ssh root@220.0.0.101 "hostname"
 ```
 
 ### Issue: "JSON parse error" / No test results
@@ -238,7 +238,7 @@ iperf3 -v
 1. Check network physically: inspect cables, ports, switch
 2. Verify NIC drivers on nodes: `ethtool -i eth0`
 3. Check for physical link issues: `ethtool eth0`
-4. Verify no blocker: `sudo tcpdump -i eth0 src 200.0.0.101`
+4. Verify no blocker: `sudo tcpdump -i eth0 src 220.0.0.101`
 
 ### Issue: High CPU but low throughput
 
@@ -297,8 +297,8 @@ Result: ✗ CPU bottleneck - optimize application or use more nodes
 ### Scenario 3: Asymmetric Paths
 
 ```
-Path A→B: 92.1 Gbps
-Path B→A: 45.3 Gbps
+Path 220.0.0.101→220.0.0.103: 92.1 Gbps
+Path 220.0.0.103→220.0.0.101: 45.3 Gbps
 Difference: 47% (high asymmetry)
 Result: ✗ Check link quality, routing, or NIC settings
 ```
@@ -309,10 +309,10 @@ For extended testing beyond this suite:
 
 ```bash
 # Detailed traffic analysis
-sudo tcpdump -i eth0 -w capture.pcap dst 200.0.0.103
+sudo tcpdump -i eth0 -w capture.pcap dst 220.0.0.103
 
 # System performance profiling
-perf stat iperf3 -c 200.0.0.103 -t 10
+perf stat iperf3 -c 220.0.0.103 -t 10
 
 # Detailed network metrics
 netstat -i
@@ -331,3 +331,4 @@ cat /proc/net/dev
 **Generated**: 2026-04-01
 **Suite Version**: 1.0
 **Test Framework**: iperf3 3.x+
+
