@@ -1,118 +1,84 @@
 #!/usr/bin/env python3
 """
-Orchestration Script - Easy one-command testing and analysis
-Runs the complete iperf3 test suite with optional setup and analysis
+Orchestrator for Slurm deployment + KPI reporting.
 """
 
-import sys
-import subprocess
 import argparse
+import subprocess
+import sys
 from pathlib import Path
 
-def run_command(cmd: str, description: str) -> bool:
-    """Run a shell command and return success status"""
-    print(f"\n{'=' * 80}")
-    print(f"[*] {description}")
-    print('=' * 80)
-    try:
-        result = subprocess.run(cmd, shell=True)
-        return result.returncode == 0
-    except Exception as e:
-        print(f"[!] Error: {e}")
-        return False
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Iperf3 Multi-Node Testing Orchestrator",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python orchestrate.py --full              # Setup, test, and analyze
-  python orchestrate.py --test              # Run tests only
-  python orchestrate.py --test --analyze    # Test and analyze
-  python orchestrate.py --setup             # Setup nodes only
-  python orchestrate.py --analyze           # Analyze last results
-        """)
-    
-    parser.add_argument('--full', action='store_true', 
-                        help='Full workflow: setup → test → analyze')
-    parser.add_argument('--setup', action='store_true',
-                        help='Setup nodes (install iperf3)')
-    parser.add_argument('--test', action='store_true',
-                        help='Run performance tests')
-    parser.add_argument('--analyze', action='store_true',
-                        help='Analyze results and bottlenecks')
-    
+def run(cmd, title: str) -> int:
+    print("\n" + "=" * 100)
+    print(f"[*] {title}")
+    print("=" * 100)
+    proc = subprocess.run(cmd)
+    return proc.returncode
+
+
+def latest_summary() -> str:
+    candidates = sorted(Path("results").glob("*/summary.json"), reverse=True)
+    return str(candidates[0]) if candidates else ""
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Slurm iperf3 workflow orchestrator")
+    parser.add_argument("--partition", default="")
+    parser.add_argument("--account", default="")
+    parser.add_argument("--duration", type=int, default=120)
+    parser.add_argument("--streams", type=int, default=32)
+    parser.add_argument("--udp-duration", type=int, default=20)
+    parser.add_argument("--udp-bandwidth-gbps", type=int, default=20)
+    parser.add_argument("--expected-gbps-per-direction", type=float, default=200.0)
+    parser.add_argument("--time-limit", default="01:00:00")
+    parser.add_argument("--interface", default="")
+    parser.add_argument("--submit-only", action="store_true")
+    parser.add_argument("--report-only", action="store_true")
     args = parser.parse_args()
-    
-    # Default to full workflow if no args
-    if not any([args.full, args.setup, args.test, args.analyze]):
-        args.full = True
-    
-    success_count = 0
-    total_steps = 0
-    
-    # STEP 1: Setup
-    if args.full or args.setup:
-        total_steps += 1
-        if run_command(
-            f"{sys.executable} setup_nodes.py",
-            "STEP 1: Installing iperf3 on nodes"
-        ):
-            success_count += 1
-        else:
-            print("[!] Setup failed - continuing with testing anyway...")
-    
-    # STEP 2: Run Tests
-    if args.full or args.test:
-        total_steps += 1
-        if run_command(
-            f"{sys.executable} iperf3_test_runner.py",
-            "STEP 2: Running Network Performance Tests"
-        ):
-            success_count += 1
-        else:
-            print("[!] Tests failed")
-            return False
-    
-    # STEP 3: Analyze Results
-    if args.full or args.analyze:
-        total_steps += 1
-        if run_command(
-            f"{sys.executable} bottleneck_analyzer.py",
-            "STEP 3: Analyzing Bottlenecks"
-        ):
-            success_count += 1
-        else:
-            print("[!] Analysis failed")
-    
-    # Summary
-    print(f"\n{'=' * 80}")
-    print(f"[✓] WORKFLOW COMPLETE: {success_count}/{total_steps} steps successful")
-    print('=' * 80)
-    
-    # Find and display reports
-    reports = list(Path('.').glob('*report*.txt'))
-    if reports:
-        print(f"\nGenerated Reports:")
-        for report in sorted(reports, reverse=True)[:3]:
-            print(f"  • {report.name}")
-    
-    results = list(Path('.').glob('*results*.json'))
-    if results:
-        print(f"\nGenerated Data:")
-        for result in sorted(results, reverse=True)[:3]:
-            print(f"  • {result.name}")
-    
-    return success_count == total_steps
+
+    if not args.report_only:
+        cmd = [
+            sys.executable,
+            "iperf3_test_runner.py",
+            "--duration",
+            str(args.duration),
+            "--streams",
+            str(args.streams),
+            "--udp-duration",
+            str(args.udp_duration),
+            "--udp-bandwidth-gbps",
+            str(args.udp_bandwidth_gbps),
+            "--expected-gbps-per-direction",
+            str(args.expected_gbps_per_direction),
+            "--time-limit",
+            args.time_limit,
+        ]
+        if args.partition:
+            cmd += ["--partition", args.partition]
+        if args.account:
+            cmd += ["--account", args.account]
+        if args.interface:
+            cmd += ["--interface", args.interface]
+        if args.submit_only:
+            cmd += ["--submit-only"]
+
+        rc = run(cmd, "Submit and run Slurm workload")
+        if rc != 0:
+            return rc
+
+    if args.submit_only:
+        print("[*] Submit-only mode requested. Skipping report generation.")
+        return 0
+
+    summary = latest_summary()
+    if not summary:
+        print("[!] No summary.json found under results/*")
+        return 1
+
+    report_cmd = [sys.executable, "bottleneck_analyzer.py", "--summary", summary]
+    return run(report_cmd, "Generate KPI report tables")
+
 
 if __name__ == "__main__":
-    try:
-        success = main()
-        sys.exit(0 if success else 1)
-    except KeyboardInterrupt:
-        print("\n[!] Interrupted by user")
-        sys.exit(130)
-    except Exception as e:
-        print(f"\n[!] Unexpected error: {e}")
-        sys.exit(1)
+    raise SystemExit(main())
