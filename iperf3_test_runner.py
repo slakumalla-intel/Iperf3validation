@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
-DEFAULT_NODES = ["220.0.0.101", "220.0.0.103", "220.0.0.104", "220.0.0.106"]
+DEFAULT_NODES = ["sc00901112s0101", "sc00901112s0103", "sc00901112s0104", "sc00901112s0106"]
 
 
 @dataclass

@@ -24,7 +24,7 @@ def latest_summary() -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Slurm iperf3 workflow orchestrator")
-    parser.add_argument("--partition", default="")
+    parser.add_argument("--partition", default="debug")
     parser.add_argument("--account", default="")
     parser.add_argument("--duration", type=int, default=120)
     parser.add_argument("--streams", type=int, default=32)
