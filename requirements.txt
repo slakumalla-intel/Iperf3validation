@@ -1,0 +1,14 @@
+# Iperf3 Testing Suite - Python Requirements
+# Install with: pip install -r requirements.txt
+
+# No external dependencies required!
+# This suite uses only Python standard library:
+# - subprocess (for SSH and command execution)
+# - json (for result parsing)
+# - pathlib (for file operations)
+# - dataclasses (for result storage)
+# - statistics (for analysis)
+# - datetime (for timestamps)
+
+# The suite is designed to be lightweight and portable.
+# It requires Python 3.7+ with no third-party package dependencies.
