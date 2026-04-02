@@ -89,7 +89,7 @@ If this returns a NIC such as `eno1`, `ens6f0`, or similar, interface detection 
 Start a server on one node:
 
 ```bash
-srun -N1 -w sc00901112s0103 bash -lc 'pkill -f "iperf3 -s" || true; iperf3 -s -D -p 5201'
+srun -N1 -w sc00901112s0103 bash -lc 'pkill -x iperf3 || true; sleep 1; iperf3 -s -D -p 5201'
 ```
 
 Run a bidirectional client test from another node:
@@ -308,9 +308,9 @@ peer_ip=$(getent ahostsv4 "$peer_host" | awk "NR==1{print \$1}")
 echo "peer_ip=$peer_ip"
 ip route get "$peer_ip" | sed -n "s/.* dev \([^ ]*\).*/\1/p" | head -n1
 '
-srun -N1 -w sc00901112s0103 bash -lc 'pkill -f "iperf3 -s" || true; iperf3 -s -D -p 5201'
+srun -N1 -w sc00901112s0103 bash -lc 'pkill -x iperf3 || true; sleep 1; iperf3 -s -D -p 5201'
 srun -N1 -w sc00901112s0101 bash -lc 'iperf3 -c sc00901112s0103 -p 5201 -t 20 -P 8 --bidir -J | head -n 40'
-srun -N1 -w sc00901112s0103 bash -lc 'pkill -f "iperf3 -s" || true'
+srun -N1 -w sc00901112s0103 bash -lc 'pkill -x iperf3 || true'
 ```
 
 ### Very low throughput reported

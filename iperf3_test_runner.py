@@ -166,14 +166,15 @@ start_servers() {{
   local node="$1"
   srun --nodes=1 --ntasks=1 -w "$node" bash -lc '
     set -euo pipefail
-    pkill -f "iperf3 -s" || true
-    iperf3 -s -D -p 5201
+        pkill -x iperf3 || true
+        sleep 1
+        iperf3 -s -D -p 5201
   '
 }}
 
 stop_servers() {{
   local node="$1"
-  srun --nodes=1 --ntasks=1 -w "$node" bash -lc 'pkill -f "iperf3 -s" || true'
+    srun --nodes=1 --ntasks=1 -w "$node" bash -lc 'pkill -x iperf3 || true'
 }}
 
 run_pair() {{
