@@ -31,6 +31,7 @@ DEFAULT_NODES = ["sc00901112s0101", "sc00901112s0103", "sc00901112s0104", "sc009
 class RunnerConfig:
     nodes: List[str]
     duration_sec: int = 120
+    tcp_omit_sec: int = 5
     streams: int = 32
     udp_duration_sec: int = 20
     udp_bandwidth_gbps: int = 20
@@ -39,6 +40,10 @@ class RunnerConfig:
     partition: str = ""
     account: str = ""
     time_limit: str = "01:00:00"
+    slurm_cpus_per_task: int = 160
+    slurm_cpu_bind: str = "cores"
+    server_cpu: int = 0
+    client_cpu: int = 1
     results_root: str = "results"
     run_id: str = ""
     expected_gbps_per_direction: float = 200.0
@@ -89,11 +94,16 @@ mkdir -p "$RESULT_DIR/raw"
 
 NODES=({" ".join(self.cfg.nodes)})
 DURATION={self.cfg.duration_sec}
+TCP_OMIT={self.cfg.tcp_omit_sec}
 STREAMS={self.cfg.streams}
 UDP_DURATION={self.cfg.udp_duration_sec}
 UDP_BW_G={self.cfg.udp_bandwidth_gbps}
 PING_COUNT={self.cfg.ping_count}
 IF_HINT="{self.cfg.interface_hint}"
+CPUS_PER_TASK={self.cfg.slurm_cpus_per_task}
+CPU_BIND="{self.cfg.slurm_cpu_bind}"
+SERVER_CPU={self.cfg.server_cpu}
+CLIENT_CPU={self.cfg.client_cpu}
 
 log() {{
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -117,7 +127,7 @@ host_snapshot() {{
   local node="$2"
   local peer="${{3:-${{NODES[0]}}}}"
 
-    srun --export=ALL,PEER="$peer",IF_HINT="$IF_HINT" --nodes=1 --ntasks=1 -w "$node" bash -lc "
+        srun --export=ALL,PEER="$peer",IF_HINT="$IF_HINT" --nodes=1 --ntasks=1 --cpus-per-task="$CPUS_PER_TASK" --cpu-bind="$CPU_BIND" -w "$node" bash -lc "
     $remote_helper
     out=\"$RESULT_DIR/raw/${{node}}_${{phase}}\"
     mkdir -p \"$out\"
@@ -142,7 +152,7 @@ apply_tuning() {{
   local node="$1"
   local peer="${{2:-${{NODES[0]}}}}"
 
-    srun --export=ALL,PEER="$peer",IF_HINT="$IF_HINT" --nodes=1 --ntasks=1 -w "$node" bash -lc "
+        srun --export=ALL,PEER="$peer",IF_HINT="$IF_HINT" --nodes=1 --ntasks=1 --cpus-per-task="$CPUS_PER_TASK" --cpu-bind="$CPU_BIND" -w "$node" bash -lc "
     $remote_helper
 
     # Kernel tuning for high-bandwidth transport.
@@ -164,17 +174,17 @@ apply_tuning() {{
 
 start_servers() {{
   local node="$1"
-  srun --nodes=1 --ntasks=1 -w "$node" bash -lc '
+    srun --nodes=1 --ntasks=1 --cpus-per-task="$CPUS_PER_TASK" --cpu-bind="$CPU_BIND" -w "$node" bash -lc '
     set -euo pipefail
         pkill -x iperf3 || true
         sleep 1
-        iperf3 -s -D -p 5201
+                taskset -c "$SERVER_CPU" iperf3 -s -D -p 5201
   '
 }}
 
 stop_servers() {{
   local node="$1"
-    srun --nodes=1 --ntasks=1 -w "$node" bash -lc 'pkill -x iperf3 || true'
+        srun --nodes=1 --ntasks=1 --cpus-per-task="$CPUS_PER_TASK" --cpu-bind="$CPU_BIND" -w "$node" bash -lc 'pkill -x iperf3 || true'
 }}
 
 run_pair() {{
@@ -183,19 +193,19 @@ run_pair() {{
   local stem="${{src}}_to_${{dst}}"
 
   log "TCP bidirectional test $src -> $dst"
-  srun --nodes=1 --ntasks=1 -w "$src" bash -lc '
+    srun --nodes=1 --ntasks=1 --cpus-per-task="$CPUS_PER_TASK" --cpu-bind="$CPU_BIND" -w "$src" bash -lc '
     set -euo pipefail
-    iperf3 -c "'"$dst"'" -p 5201 -t '"$DURATION"' -P '"$STREAMS"' --bidir -J --get-server-output
+        taskset -c "$CLIENT_CPU" iperf3 -c "'"$dst"'" -p 5201 -O '"$TCP_OMIT"' -t '"$DURATION"' -P '"$STREAMS"' --bidir -J --get-server-output
   ' > "$RESULT_DIR/raw/${{stem}}_tcp.json" 2> "$RESULT_DIR/raw/${{stem}}_tcp.stderr" || true
 
   log "UDP jitter/loss test $src -> $dst"
-  srun --nodes=1 --ntasks=1 -w "$src" bash -lc '
+    srun --nodes=1 --ntasks=1 --cpus-per-task="$CPUS_PER_TASK" --cpu-bind="$CPU_BIND" -w "$src" bash -lc '
     set -euo pipefail
-    iperf3 -c "'"$dst"'" -p 5201 -u -b '"$UDP_BW_G"'G -l 256 -t '"$UDP_DURATION"' -J --get-server-output
+        taskset -c "$CLIENT_CPU" iperf3 -c "'"$dst"'" -p 5201 -u -b '"$UDP_BW_G"'G -l 256 -t '"$UDP_DURATION"' -J --get-server-output
   ' > "$RESULT_DIR/raw/${{stem}}_udp.json" 2> "$RESULT_DIR/raw/${{stem}}_udp.stderr" || true
 
   log "Ping RTT sample $src -> $dst"
-  srun --nodes=1 --ntasks=1 -w "$src" bash -lc '
+    srun --nodes=1 --ntasks=1 --cpus-per-task="$CPUS_PER_TASK" --cpu-bind="$CPU_BIND" -w "$src" bash -lc '
     set -euo pipefail
     ping -c '"$PING_COUNT"' "'"$dst"'"
   ' > "$RESULT_DIR/raw/${{stem}}_ping.txt" 2> "$RESULT_DIR/raw/${{stem}}_ping.stderr" || true
@@ -473,6 +483,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Slurm-native iperf3 test runner")
     parser.add_argument("--nodes", nargs="+", default=DEFAULT_NODES)
     parser.add_argument("--duration", type=int, default=120)
+    parser.add_argument("--tcp-omit", type=int, default=5)
     parser.add_argument("--streams", type=int, default=32)
     parser.add_argument("--udp-duration", type=int, default=20)
     parser.add_argument("--udp-bandwidth-gbps", type=int, default=20)
@@ -481,14 +492,28 @@ def main() -> int:
     parser.add_argument("--partition", default="")
     parser.add_argument("--account", default="")
     parser.add_argument("--time-limit", default="01:00:00")
+    parser.add_argument("--cpus-per-task", type=int, default=160)
+    parser.add_argument("--cpu-bind", default="cores")
+    parser.add_argument("--server-cpu", type=int, default=0)
+    parser.add_argument("--client-cpu", type=int, default=1)
     parser.add_argument("--run-id", default="")
     parser.add_argument("--expected-gbps-per-direction", type=float, default=200.0)
     parser.add_argument("--submit-only", action="store_true")
     args = parser.parse_args()
 
+    if args.cpus_per_task < 1:
+        raise ValueError("--cpus-per-task must be >= 1")
+    if args.server_cpu < 0 or args.client_cpu < 0:
+        raise ValueError("--server-cpu and --client-cpu must be >= 0")
+    if args.server_cpu >= args.cpus_per_task or args.client_cpu >= args.cpus_per_task:
+        raise ValueError("--server-cpu/--client-cpu must be less than --cpus-per-task")
+    if args.tcp_omit < 0:
+        raise ValueError("--tcp-omit must be >= 0")
+
     cfg = RunnerConfig(
         nodes=args.nodes,
         duration_sec=args.duration,
+        tcp_omit_sec=args.tcp_omit,
         streams=args.streams,
         udp_duration_sec=args.udp_duration,
         udp_bandwidth_gbps=args.udp_bandwidth_gbps,
@@ -497,6 +522,10 @@ def main() -> int:
         partition=args.partition,
         account=args.account,
         time_limit=args.time_limit,
+        slurm_cpus_per_task=args.cpus_per_task,
+        slurm_cpu_bind=args.cpu_bind,
+        server_cpu=args.server_cpu,
+        client_cpu=args.client_cpu,
         run_id=args.run_id,
         expected_gbps_per_direction=args.expected_gbps_per_direction,
     )

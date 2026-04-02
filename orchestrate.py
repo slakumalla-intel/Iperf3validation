@@ -27,12 +27,17 @@ def main() -> int:
     parser.add_argument("--partition", default="debug")
     parser.add_argument("--account", default="")
     parser.add_argument("--duration", type=int, default=120)
+    parser.add_argument("--tcp-omit", type=int, default=5)
     parser.add_argument("--streams", type=int, default=32)
     parser.add_argument("--udp-duration", type=int, default=20)
     parser.add_argument("--udp-bandwidth-gbps", type=int, default=20)
     parser.add_argument("--expected-gbps-per-direction", type=float, default=200.0)
     parser.add_argument("--time-limit", default="01:00:00")
     parser.add_argument("--interface", default="")
+    parser.add_argument("--cpus-per-task", type=int, default=160)
+    parser.add_argument("--cpu-bind", default="cores")
+    parser.add_argument("--server-cpu", type=int, default=0)
+    parser.add_argument("--client-cpu", type=int, default=1)
     parser.add_argument("--submit-only", action="store_true")
     parser.add_argument("--report-only", action="store_true")
     args = parser.parse_args()
@@ -43,12 +48,22 @@ def main() -> int:
             "iperf3_test_runner.py",
             "--duration",
             str(args.duration),
+            "--tcp-omit",
+            str(args.tcp_omit),
             "--streams",
             str(args.streams),
             "--udp-duration",
             str(args.udp_duration),
             "--udp-bandwidth-gbps",
             str(args.udp_bandwidth_gbps),
+            "--cpus-per-task",
+            str(args.cpus_per_task),
+            "--cpu-bind",
+            args.cpu_bind,
+            "--server-cpu",
+            str(args.server_cpu),
+            "--client-cpu",
+            str(args.client_cpu),
             "--expected-gbps-per-direction",
             str(args.expected_gbps_per_direction),
             "--time-limit",

@@ -175,9 +175,14 @@ Uses:
 ```bash
 python3 orchestrate.py \
   --duration 300 \
+  --tcp-omit 5 \
   --streams 64 \
   --udp-duration 30 \
   --udp-bandwidth-gbps 30 \
+  --cpus-per-task 160 \
+  --cpu-bind cores \
+  --server-cpu 0 \
+  --client-cpu 1 \
   --time-limit 02:00:00
 ```
 
@@ -352,6 +357,15 @@ python3 orchestrate.py --duration 600 --time-limit 02:00:00
 python3 orchestrate.py --streams 128
 ```
 
+### Pin iperf processes to specific cores (recommended)
+```bash
+python3 orchestrate.py --cpus-per-task 160 --cpu-bind cores --server-cpu 0 --client-cpu 1 --tcp-omit 5
+```
+Notes:
+- `--server-cpu` is the pinned core for `iperf3 -s` on each server node.
+- `--client-cpu` is the pinned core for the `iperf3 -c` process on each source node.
+- Keep server/client on different core IDs to reduce scheduler jitter.
+
 ### Custom Slurm parameters
 Edit `iperf3_test_runner.py` line 87-92 to add extra Slurm directives:
 ```python
@@ -376,7 +390,7 @@ For 160-core nodes with 200 Gbps NICs, well-tuned systems should achieve:
 If you're consistently below 80% of expected, the bottleneck is likely:
 1. **Fabric/NIC PHY** - Check switch port config, cable quality
 2. **Network stack tuning** - Script applies automatically; verify it succeeded
-3. **Interrupt handling** - May need CPU affinity (not yet automated)
+3. **Interrupt handling** - Tune IRQ affinity / RSS queues to complement process pinning
 4. **Background traffic** - Run during off-peak hours
 
 ## Support
