@@ -115,7 +115,9 @@ iface_hint="${{IF_HINT:-}}"
 if [[ -n "$iface_hint" ]]; then
   iface="$iface_hint"
 else
-    iface=$(ip route get "$peer" 2>/dev/null | sed -n "s/.* dev \\([^ ]*\\).*/\\1/p" | head -n1)
+    peer_ip=$(getent ahostsv4 "$peer" 2>/dev/null | awk "NR==1{{print \$1}}")
+    target="${{peer_ip:-$peer}}"
+    iface=$(ip route get "$target" 2>/dev/null | sed -n "s/.* dev \\([^ ]*\\).*/\\1/p" | head -n1)
   if [[ -z "$iface" ]]; then iface="eth0"; fi
 fi
 '
