@@ -72,6 +72,16 @@ class SlurmIperfRunner:
         script = f"""#!/usr/bin/env bash
 set -euo pipefail
 
+    unset SLURM_JOB_ID
+    unset SLURM_JOBID
+    unset SLURM_STEP_ID
+    unset SLURM_STEPID
+    unset SLURM_NNODES
+    unset SLURM_NODELIST
+    unset SLURM_JOB_NODELIST
+    unset SLURM_NTASKS
+    unset SLURM_TASKS_PER_NODE
+
 #SBATCH --job-name=iperf3_200g_{self.cfg.run_id}
 #SBATCH --nodes={len(self.cfg.nodes)}
 #SBATCH --ntasks-per-node=1
@@ -105,7 +115,7 @@ iface_hint="${{IF_HINT:-}}"
 if [[ -n "$iface_hint" ]]; then
   iface="$iface_hint"
 else
-  iface=$(ip route get "$peer" 2>/dev/null | awk '\''/dev/ {{print $5; exit}}'\'')
+    iface=$(ip route get "$peer" 2>/dev/null | sed -n "s/.* dev \\([^ ]*\\).*/\\1/p" | head -n1)
   if [[ -z "$iface" ]]; then iface="eth0"; fi
 fi
 '
