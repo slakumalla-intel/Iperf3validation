@@ -105,9 +105,9 @@ iface_hint="${{IF_HINT:-}}"
 if [[ -n "$iface_hint" ]]; then
   iface="$iface_hint"
 else
-  # Extract IP from hostname: sc00901112s0XXX -> 220.0.0.XXX
-  peer_ip="220.0.0.$(echo "$peer" | grep -oE "[0-9]{{3}}$" | tail -c 4)"
-  iface=$(ip route get "$peer_ip" 2>/dev/null | awk "{{for(i=1;i<=NF;i++) if(\\$i==\"dev\") print \\$(i+1)}}" | head -n1)
+    peer_ip=$(scontrol show node "$peer" 2>/dev/null | tr " " "\n" | awk -F= "/^NodeAddr=/{{print \\$2; exit}}")
+    target="${{peer_ip:-$peer}}"
+    iface=$(ip route get "$target" 2>/dev/null | awk "{{for(i=1;i<=NF;i++) if(\\$i==\"dev\") print \\$(i+1)}}" | head -n1)
   if [[ -z "$iface" ]]; then iface="eth0"; fi
 fi
 '

@@ -77,9 +77,9 @@ This is the validated manual check that matches the runner logic.
 ```bash
 srun -N1 -w sc00901112s0101 bash -lc '
 peer_host=sc00901112s0103
-peer_ip=$(getent ahostsv4 "$peer_host" | awk "NR==1{print \$1}")
-echo "peer_ip=$peer_ip"
-ip route get "$peer_ip" | sed -n "s/.* dev \([^ ]*\).*/\1/p" | head -n1
+peer_ip=$(scontrol show node "$peer_host" | tr " " "\n" | awk -F= "/^NodeAddr=/{print \$2}")
+iface=$(ip route get "$peer_ip" | awk "{for(i=1;i<=NF;i++) if(\$i==\"dev\") print \$(i+1)}" | head -n1)
+echo "peer_ip=$peer_ip iface=$iface"
 '
 ```
 
@@ -304,9 +304,9 @@ sinfo
 srun -N1 -w sc00901112s0101 hostname
 srun -N1 -w sc00901112s0101 bash -lc '
 peer_host=sc00901112s0103
-peer_ip=$(getent ahostsv4 "$peer_host" | awk "NR==1{print \$1}")
-echo "peer_ip=$peer_ip"
-ip route get "$peer_ip" | sed -n "s/.* dev \([^ ]*\).*/\1/p" | head -n1
+peer_ip=$(scontrol show node "$peer_host" | tr " " "\n" | awk -F= "/^NodeAddr=/{print \$2}")
+iface=$(ip route get "$peer_ip" | awk "{for(i=1;i<=NF;i++) if(\$i==\"dev\") print \$(i+1)}" | head -n1)
+echo "peer_ip=$peer_ip iface=$iface"
 '
 srun -N1 -w sc00901112s0103 bash -lc 'pkill -x iperf3 || true; sleep 1; iperf3 -s -D -p 5201'
 srun -N1 -w sc00901112s0101 bash -lc 'iperf3 -c sc00901112s0103 -p 5201 -t 20 -P 8 --bidir -J | head -n 40'
