@@ -70,19 +70,7 @@ class SlurmIperfRunner:
         account_line = f"#SBATCH --account={self.cfg.account}" if self.cfg.account else ""
 
         script = f"""#!/usr/bin/env bash
-set -euo pipefail
-
-    unset SLURM_JOB_ID
-    unset SLURM_JOBID
-    unset SLURM_STEP_ID
-    unset SLURM_STEPID
-    unset SLURM_NNODES
-    unset SLURM_NODELIST
-    unset SLURM_JOB_NODELIST
-    unset SLURM_NTASKS
-    unset SLURM_TASKS_PER_NODE
-
-#SBATCH --job-name=iperf3_200g_{self.cfg.run_id}
+    #SBATCH --job-name=iperf3_200g_{self.cfg.run_id}
 #SBATCH --nodes={len(self.cfg.nodes)}
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=160
@@ -93,6 +81,8 @@ set -euo pipefail
 #SBATCH --error={self.result_dir.as_posix()}/slurm-%j.err
 {partition_line}
 {account_line}
+
+set -euo pipefail
 
 RESULT_DIR="{self.result_dir.as_posix()}"
 mkdir -p "$RESULT_DIR/raw"
@@ -115,7 +105,7 @@ iface_hint="${{IF_HINT:-}}"
 if [[ -n "$iface_hint" ]]; then
   iface="$iface_hint"
 else
-    peer_ip=$(getent ahostsv4 "$peer" 2>/dev/null | awk "NR==1{{print \$1}}")
+    peer_ip=$(getent ahostsv4 "$peer" 2>/dev/null | awk "NR==1{{print \\$1}}")
     target="${{peer_ip:-$peer}}"
     iface=$(ip route get "$target" 2>/dev/null | sed -n "s/.* dev \\([^ ]*\\).*/\\1/p" | head -n1)
   if [[ -z "$iface" ]]; then iface="eth0"; fi
@@ -127,7 +117,7 @@ host_snapshot() {{
   local node="$2"
   local peer="${{3:-${{NODES[0]}}}}"
 
-  srun --nodes=1 --ntasks=1 -w "$node" bash -lc "
+    srun --export=ALL,PEER="$peer",IF_HINT="$IF_HINT" --nodes=1 --ntasks=1 -w "$node" bash -lc "
     $remote_helper
     out=\"$RESULT_DIR/raw/${{node}}_${{phase}}\"
     mkdir -p \"$out\"
@@ -152,7 +142,7 @@ apply_tuning() {{
   local node="$1"
   local peer="${{2:-${{NODES[0]}}}}"
 
-  srun --nodes=1 --ntasks=1 -w "$node" bash -lc "
+    srun --export=ALL,PEER="$peer",IF_HINT="$IF_HINT" --nodes=1 --ntasks=1 -w "$node" bash -lc "
     $remote_helper
 
     # Kernel tuning for high-bandwidth transport.
@@ -212,12 +202,12 @@ run_pair() {{
 
 log "Starting pre-check snapshots"
 for n in "${{NODES[@]}}"; do
-  PEER="${{NODES[0]}}" IF_HINT="$IF_HINT" host_snapshot pre "$n" "${{NODES[0]}}"
+    host_snapshot pre "$n" "${{NODES[0]}}"
 done
 
 log "Applying tuning on all nodes"
 for n in "${{NODES[@]}}"; do
-  PEER="${{NODES[0]}}" IF_HINT="$IF_HINT" apply_tuning "$n" "${{NODES[0]}}"
+    apply_tuning "$n" "${{NODES[0]}}"
 done
 
 log "Starting iperf3 servers"

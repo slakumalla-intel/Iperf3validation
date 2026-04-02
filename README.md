@@ -38,23 +38,75 @@ This suite validates 200 Gbps bidirectional network performance across your 4-no
 | `diagnostic.py` | Troubleshooting tool for single node testing |
 | `README.md` | This file |
 
-## Quick Start (3 Commands)
+## Recommended Test Sequence
 
 ### 1. Navigate to project directory
 ```bash
 cd /root/Iperf3validation
 ```
 
-### 2. Verify dependencies
+### 2. Verify submit-node dependencies
 ```bash
 python3 --version          # Should be 3.7+
-which sbatch               # Should be in /usr/bin or /usr/local/bin
-which iperf3               # iperf3 will be installed by the job
+which sbatch squeue sacct srun
+which iperf3 ethtool ip nstat lspci
 ```
 
-### 3. Run the test suite
+### 3. Verify Slurm node state
 ```bash
-python3 orchestrate.py
+sinfo
+```
+
+Expected state:
+```text
+PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST
+debug*       up   infinite      4   idle sc00901112s[0101,0103-0104,0106]
+```
+
+### 4. Verify Slurm can launch on each test node
+```bash
+srun -N1 -w sc00901112s0101 hostname
+srun -N1 -w sc00901112s0103 hostname
+srun -N1 -w sc00901112s0104 hostname
+srun -N1 -w sc00901112s0106 hostname
+```
+
+### 5. Verify hostname-to-IP route and interface detection
+This is the validated manual check that matches the runner logic.
+
+```bash
+srun -N1 -w sc00901112s0101 bash -lc '
+peer_host=sc00901112s0103
+peer_ip=$(getent ahostsv4 "$peer_host" | awk "NR==1{print \$1}")
+echo "peer_ip=$peer_ip"
+ip route get "$peer_ip" | sed -n "s/.* dev \([^ ]*\).*/\1/p" | head -n1
+'
+```
+
+If this returns a NIC such as `eno1`, `ens6f0`, or similar, interface detection is working.
+
+### 6. Run a single manual iperf3 smoke test
+Start a server on one node:
+
+```bash
+srun -N1 -w sc00901112s0103 bash -lc 'pkill -f "iperf3 -s" || true; iperf3 -s -D -p 5201'
+```
+
+Run a bidirectional client test from another node:
+
+```bash
+srun -N1 -w sc00901112s0101 bash -lc 'iperf3 -c sc00901112s0103 -p 5201 -t 20 -P 8 --bidir -J | head -n 40'
+```
+
+Stop the server:
+
+```bash
+srun -N1 -w sc00901112s0103 bash -lc 'pkill -f "iperf3 -s" || true'
+```
+
+### 7. Submit the full workload
+```bash
+python3 orchestrate.py --partition debug --duration 120 --streams 32
 ```
 
 The script will:
@@ -66,6 +118,17 @@ The script will:
 6. ✓ Collect PCIe/network/interface error telemetry
 7. ✓ Generate summary.json and KPI report table
 8. ✓ Display formatted bottleneck analysis
+
+### 8. Monitor the running job
+```bash
+squeue -u root
+```
+
+### 9. Read the final report
+```bash
+python3 bottleneck_analyzer.py
+cat results/*/kpi_report.txt
+```
 
 **Typical runtime**: 10-15 minutes total
 
@@ -99,9 +162,9 @@ debug*       up   infinite      4   idle sc00901112s[0101,0103-0104,0106]
 
 ## Running Tests
 
-### Option A: Default run (recommended)
+### Option A: Full run after preflight (recommended)
 ```bash
-python3 orchestrate.py
+python3 orchestrate.py --partition debug
 ```
 Uses:
 - Duration: 120 seconds per test
@@ -120,12 +183,19 @@ python3 orchestrate.py \
 
 ### Option C: Submit without waiting
 ```bash
-python3 orchestrate.py --submit-only
+python3 orchestrate.py --submit-only --partition debug
 ```
 Then later check results:
 ```bash
 squeue -u root
 python3 bottleneck_analyzer.py
+```
+
+### Option D: Force a specific NIC
+Use this if the route-based interface detection returns the wrong interface or no interface.
+
+```bash
+python3 orchestrate.py --partition debug --interface eno1
 ```
 
 ## Results
@@ -221,9 +291,26 @@ sinfo --version
 Check the Slurm output log:
 ```bash
 cat results/*/slurm_job.sh
+cat results/*/slurm-*.out
+cat results/*/slurm-*.err
 # Examine the raw iperf3 outputs
 cat results/*/raw/*_tcp.stderr
 cat results/*/raw/*_udp.stderr
+```
+
+Before re-running, repeat the manual preflight in this order:
+```bash
+sinfo
+srun -N1 -w sc00901112s0101 hostname
+srun -N1 -w sc00901112s0101 bash -lc '
+peer_host=sc00901112s0103
+peer_ip=$(getent ahostsv4 "$peer_host" | awk "NR==1{print \$1}")
+echo "peer_ip=$peer_ip"
+ip route get "$peer_ip" | sed -n "s/.* dev \([^ ]*\).*/\1/p" | head -n1
+'
+srun -N1 -w sc00901112s0103 bash -lc 'pkill -f "iperf3 -s" || true; iperf3 -s -D -p 5201'
+srun -N1 -w sc00901112s0101 bash -lc 'iperf3 -c sc00901112s0103 -p 5201 -t 20 -P 8 --bidir -J | head -n 40'
+srun -N1 -w sc00901112s0103 bash -lc 'pkill -f "iperf3 -s" || true'
 ```
 
 ### Very low throughput reported
