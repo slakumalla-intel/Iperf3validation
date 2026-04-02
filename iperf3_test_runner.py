@@ -34,7 +34,8 @@ class RunnerConfig:
     tcp_omit_sec: int = 5
     streams: int = 32
     udp_duration_sec: int = 20
-    udp_bandwidth_gbps: int = 20
+    udp_bandwidth_gbps: int = 200
+    run_udp: bool = True
     ping_count: int = 20
     interface_hint: str = ""
     partition: str = ""
@@ -98,6 +99,7 @@ TCP_OMIT={self.cfg.tcp_omit_sec}
 STREAMS={self.cfg.streams}
 UDP_DURATION={self.cfg.udp_duration_sec}
 UDP_BW_G={self.cfg.udp_bandwidth_gbps}
+RUN_UDP={1 if self.cfg.run_udp else 0}
 PING_COUNT={self.cfg.ping_count}
 IF_HINT="{self.cfg.interface_hint}"
 CPUS_PER_TASK={self.cfg.slurm_cpus_per_task}
@@ -198,11 +200,17 @@ run_pair() {{
         taskset -c "$CLIENT_CPU" iperf3 -c "'"$dst"'" -p 5201 -O '"$TCP_OMIT"' -t '"$DURATION"' -P '"$STREAMS"' --bidir -J --get-server-output
   ' > "$RESULT_DIR/raw/${{stem}}_tcp.json" 2> "$RESULT_DIR/raw/${{stem}}_tcp.stderr" || true
 
-  log "UDP jitter/loss test $src -> $dst"
-    srun --nodes=1 --ntasks=1 --cpus-per-task="$CPUS_PER_TASK" --cpu-bind="$CPU_BIND" -w "$src" bash -lc '
-    set -euo pipefail
-        taskset -c "$CLIENT_CPU" iperf3 -c "'"$dst"'" -p 5201 -u -b '"$UDP_BW_G"'G -l 256 -t '"$UDP_DURATION"' -J --get-server-output
-  ' > "$RESULT_DIR/raw/${{stem}}_udp.json" 2> "$RESULT_DIR/raw/${{stem}}_udp.stderr" || true
+    if [[ "$RUN_UDP" == "1" ]]; then
+        log "UDP jitter/loss test $src -> $dst"
+            srun --nodes=1 --ntasks=1 --cpus-per-task="$CPUS_PER_TASK" --cpu-bind="$CPU_BIND" -w "$src" bash -lc '
+            set -euo pipefail
+                    taskset -c "$CLIENT_CPU" iperf3 -c "'"$dst"'" -p 5201 -u -b '"$UDP_BW_G"'G -l 256 -t '"$UDP_DURATION"' -J --get-server-output
+        ' > "$RESULT_DIR/raw/${{stem}}_udp.json" 2> "$RESULT_DIR/raw/${{stem}}_udp.stderr" || true
+    else
+        log "UDP test disabled for $src -> $dst"
+        : > "$RESULT_DIR/raw/${{stem}}_udp.json"
+        : > "$RESULT_DIR/raw/${{stem}}_udp.stderr"
+    fi
 
   log "Ping RTT sample $src -> $dst"
     srun --nodes=1 --ntasks=1 --cpus-per-task="$CPUS_PER_TASK" --cpu-bind="$CPU_BIND" -w "$src" bash -lc '
@@ -486,7 +494,7 @@ def main() -> int:
     parser.add_argument("--tcp-omit", type=int, default=5)
     parser.add_argument("--streams", type=int, default=32)
     parser.add_argument("--udp-duration", type=int, default=20)
-    parser.add_argument("--udp-bandwidth-gbps", type=int, default=20)
+    parser.add_argument("--udp-bandwidth-gbps", type=int, default=None)
     parser.add_argument("--ping-count", type=int, default=20)
     parser.add_argument("--interface", default="")
     parser.add_argument("--partition", default="")
@@ -498,6 +506,9 @@ def main() -> int:
     parser.add_argument("--client-cpu", type=int, default=1)
     parser.add_argument("--run-id", default="")
     parser.add_argument("--expected-gbps-per-direction", type=float, default=200.0)
+    parser.add_argument("--run-udp", dest="run_udp", action="store_true")
+    parser.add_argument("--no-run-udp", dest="run_udp", action="store_false")
+    parser.set_defaults(run_udp=True)
     parser.add_argument("--submit-only", action="store_true")
     args = parser.parse_args()
 
@@ -509,6 +520,13 @@ def main() -> int:
         raise ValueError("--server-cpu/--client-cpu must be less than --cpus-per-task")
     if args.tcp_omit < 0:
         raise ValueError("--tcp-omit must be >= 0")
+    if args.udp_duration < 0:
+        raise ValueError("--udp-duration must be >= 0")
+
+    default_udp_bw = max(1, int(round(args.expected_gbps_per_direction)))
+    udp_bw = args.udp_bandwidth_gbps if args.udp_bandwidth_gbps is not None else default_udp_bw
+    if udp_bw < 1:
+        raise ValueError("--udp-bandwidth-gbps must be >= 1")
 
     cfg = RunnerConfig(
         nodes=args.nodes,
@@ -516,7 +534,8 @@ def main() -> int:
         tcp_omit_sec=args.tcp_omit,
         streams=args.streams,
         udp_duration_sec=args.udp_duration,
-        udp_bandwidth_gbps=args.udp_bandwidth_gbps,
+        udp_bandwidth_gbps=udp_bw,
+        run_udp=args.run_udp,
         ping_count=args.ping_count,
         interface_hint=args.interface,
         partition=args.partition,

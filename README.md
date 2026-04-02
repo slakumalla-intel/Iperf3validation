@@ -178,13 +178,17 @@ python3 orchestrate.py \
   --tcp-omit 5 \
   --streams 64 \
   --udp-duration 30 \
-  --udp-bandwidth-gbps 30 \
+  --udp-bandwidth-gbps 200 \
   --cpus-per-task 160 \
   --cpu-bind cores \
   --server-cpu 0 \
   --client-cpu 1 \
   --time-limit 02:00:00
 ```
+
+Notes:
+- If `--udp-bandwidth-gbps` is not provided, it defaults to `--expected-gbps-per-direction`.
+- Use `--no-run-udp` for pure TCP max-throughput sweeps.
 
 ### Option C: Submit without waiting
 ```bash
@@ -355,6 +359,11 @@ python3 orchestrate.py --duration 600 --time-limit 02:00:00
 ### Use more parallel streams for saturating NICs
 ```bash
 python3 orchestrate.py --streams 128
+```
+
+### Pure TCP max-throughput mode (disable UDP)
+```bash
+python3 orchestrate.py --no-run-udp --streams 128 --cpus-per-task 160 --cpu-bind cores --server-cpu 0 --client-cpu 1
 ```
 
 ### Pin iperf processes to specific cores (recommended)
