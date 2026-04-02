@@ -1,334 +1,329 @@
-# Iperf3 Multi-Node Network Performance Testing Suite
+# Iperf3 Slurm Network Performance Testing Suite
 
-Comprehensive network performance testing framework for rack systems with detailed bottleneck analysis.
+Comprehensive Slurm-native network performance testing framework for Linux HPC systems. Tests bidirectional bandwidth, latency, jitter, and identifies CPU/fabric/PCIe bottlenecks with detailed KPI tables.
 
 ## Overview
 
-This suite tests bandwidth performance between all node pairs in a multi-node system, analyzes CPU utilization, and identifies network bottlenecks.
+This suite validates 200 Gbps bidirectional network performance across your 4-node rack system using Slurm job scheduling. It applies kernel/NIC tuning, runs TCP/UDP tests, collects PCIe/network error signatures, and produces KPI reports showing bandwidth vs expected, CPU utilization, latency, and bottleneck classification.
 
-**Configuration:**
-- **4 Nodes**: 220.0.0.101, 220.0.0.103, 220.0.0.104, 220.0.0.106
+**System Configuration:**
+- **4 Nodes**: sc00901112s0101, sc00901112s0103, sc00901112s0104, sc00901112s0106
+- **Partition**: debug
 - **Cores per node**: 160 cores
-- **Test protocol**: TCP (bidirectional)
-- **Parallel streams**: 16 (tuned for 160-core systems)
-- **Test duration**: 300 seconds per test
-- **Total paths**: 12 (6 node pairs × 2 directions)
+- **Target bandwidth**: 200 Gbps per direction (400 Gbps aggregate)
+- **Test protocol**: TCP bidirectional + UDP latency/jitter
+- **Parallel streams**: 32 (tuned for 160-core systems)
+- **Test pairings**: 12 (all source-destination combinations)
 
 ## Requirements
 
-### On Control Machine (Windows/Linux)
+### Submission Node (node 9 or login node)
 - Python 3.7+
-- SSH access to all 4 nodes with root/sudo privileges
-- SSH key-based authentication (recommended) or password auth
+- Slurm tools: `sbatch`, `squeue`, `sacct`
+- Network tools: `ping`
 
-### On Test Nodes
-- iperf3 installed (any recent version)
-- Linux OS (Ubuntu, CentOS, RHEL, Fedora, etc.)
-- Network connectivity between all nodes
+### Compute Nodes
+- CentOS 7/8 or RHEL 7/8+
+- iperf3 (installed or will be during job execution)
+- Linux kernel 4.0+ (for BBR congestion control)
+- Privileged access to apply network tuning (root capable)
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `iperf3_test_runner.py` | Main testing orchestrator - runs benchmarks and generates reports |
-| `setup_nodes.py` | Installs iperf3 on all test nodes |
-| `bottleneck_analyzer.py` | Detailed analysis of bottlenecks and performance issues |
+| `orchestrate.py` | Main orchestrator - submits Slurm job and generates report |
+| `iperf3_test_runner.py` | Slurm job script - applies tuning, runs tests, collects metrics |
+| `bottleneck_analyzer.py` | KPI report generator - produces formatted tables |
+| `diagnostic.py` | Troubleshooting tool for single node testing |
 | `README.md` | This file |
 
-## Quick Start
+## Quick Start (3 Commands)
 
-### 1. Configure SSH Access
-
-Ensure you can SSH to all nodes without password prompts:
-
+### 1. Navigate to project directory
 ```bash
-# Edit iperf3_test_runner.py and set ssh_user if needed (line 20)
-# Default: root
-
-# Test SSH access
-ssh root@220.0.0.101 "echo 'SSH works'"
-ssh root@220.0.0.103 "echo 'SSH works'"
-ssh root@220.0.0.104 "echo 'SSH works'"
-ssh root@220.0.0.106 "echo 'SSH works'"
+cd /root/Iperf3validation
 ```
 
-### 2. Setup Nodes (Optional)
-
-If iperf3 is not installed on nodes, run setup:
-
+### 2. Verify dependencies
 ```bash
-python setup_nodes.py
+python3 --version          # Should be 3.7+
+which sbatch               # Should be in /usr/bin or /usr/local/bin
+which iperf3               # iperf3 will be installed by the job
 ```
 
-### 3. Run Performance Tests
-
+### 3. Run the test suite
 ```bash
-python iperf3_test_runner.py
+python3 orchestrate.py
 ```
 
-**What happens:**
-1. ✓ Checks connectivity to all 4 nodes
-2. ✓ Starts iperf3 servers on all nodes
-3. ✓ Runs bidirectional tests between all node pairs
-4. ✓ Collects CPU utilization metrics
-5. ✓ Generates text report (iperf3_report_YYYYMMDD_HHMMSS.txt)
-6. ✓ Saves JSON results (iperf3_results_YYYYMMDD_HHMMSS.json)
+The script will:
+1. ✓ Submit Slurm batch job to `debug` partition
+2. ✓ Apply kernel/NIC tuning on each compute node
+3. ✓ Start iperf3 servers
+4. ✓ Run bidirectional TCP tests (P=32 parallel streams)
+5. ✓ Run UDP latency/jitter tests
+6. ✓ Collect PCIe/network/interface error telemetry
+7. ✓ Generate summary.json and KPI report table
+8. ✓ Display formatted bottleneck analysis
 
-### 4. Analyze Bottlenecks
+**Typical runtime**: 10-15 minutes total
 
+## Installation
+
+### On CentOS (if not already done)
 ```bash
-python bottleneck_analyzer.py
+sudo yum update -y
+sudo yum install -y \
+  python3 \
+  iperf3 \
+  iproute \
+  ethtool \
+  net-tools \
+  pciutils \
+  dmesg
 ```
 
-**Generates:**
-- Bottleneck Analysis Report
-- Link saturation analysis
-- CPU bottleneck detection
-- Path asymmetry analysis
-- Performance consistency metrics
-
-## Understanding the Reports
-
-### Main Report (iperf3_report_*.txt)
-
-Shows overall performance metrics:
-
-```
-THROUGHPUT SUMMARY
-  Average Throughput:  45.67 Gbps        # Mean across all paths
-  Median Throughput:   44.23 Gbps
-  Min Throughput:      38.45 Gbps        # Slowest path
-  Max Throughput:      52.10 Gbps        # Fastest path
-  Std Deviation:       4.23 Gbps         # Variability
-
-CPU UTILIZATION ANALYSIS
-  Avg Client CPU:      25.3%
-  Max Client CPU:      67.8%             # Peak utilization
-  Avg Server CPU:      18.1%
-  Max Server CPU:      52.4%
-
-BOTTLENECK ANALYSIS
-  [1] Path: 220.0.0.101 → 220.0.0.103
-      Throughput: 38.45 Gbps
-      Degradation: 15.8%
+### Verify Slurm is available
+```bash
+sinfo
+squeue
+sacct --version
 ```
 
-### Bottleneck Analysis Report (bottleneck_analysis.txt)
-
-Detailed diagnosis with recommendations:
-
+Expected output from `sinfo`:
 ```
-[LINK SATURATION ANALYSIS]
-Assuming 100GbE NIC per node (theoretical max: 100.00 Gbps)
-
-🟢 OK    220.0.0.101 → 220.0.0.103:   45.67 Gbps (45.7% saturation)
-🟡 HIGH  220.0.0.101 → 220.0.0.104:   82.30 Gbps (82.3% saturation)
+PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST
+debug*       up   infinite      4   idle sc00901112s[0101,0103-0104,0106]
 ```
 
-### JSON Results (iperf3_results_*.json)
+## Running Tests
 
-Raw data for custom analysis:
+### Option A: Default run (recommended)
+```bash
+python3 orchestrate.py
+```
+Uses:
+- Duration: 120 seconds per test
+- Streams: 32 parallel TCP connections
+- Partition: debug (auto-detected)
 
-```json
-[
-  {
-    "source": "220.0.0.101",
-    "destination": "220.0.0.103",
-    "throughput_gbps": 45.67,
-    "throughput_mbps": 45670.00,
-    "cpu_client": 25.3,
-    "cpu_server": 18.1,
-    "timestamp": "2026-04-01T14:23:45"
-  }
-]
+### Option B: Custom parameters
+```bash
+python3 orchestrate.py \
+  --duration 300 \
+  --streams 64 \
+  --udp-duration 30 \
+  --udp-bandwidth-gbps 30 \
+  --time-limit 02:00:00
 ```
 
-## Interpreting Results
-
-### Performance Levels
-
-| Metric | Status | Interpretation |
-|--------|--------|-----------------|
-| > 90 Gbps | 🟢 Excellent | Near-wire speed 100GbE |
-| 70-90 Gbps | 🟡 Good | Well utilized 100GbE link |
-| 50-70 Gbps | 🟠 Fair | Application or CPU limited |
-| < 50 Gbps | 🔴 Poor | Serious bottleneck |
-
-### Bottleneck Types
-
-**1. Link Saturation (Network Bottleneck)**
-- If saturation > 80% and throughput increases with more threads: **network limited**
-- If saturation doesn't change with parameter tuning: **link speed issue**
-
-**2. CPU Bottleneck**
-- Client CPU > 80%: Application limited, tune driver settings
-- Server CPU > 80%: Application or interrupt handling limited
-- Both high: System is CPU-bound, scale horizontally or optimize app
-
-**3. Asymmetric Paths**
-- Forward and reverse throughput differ > 20%: Check routing, duplex settings
-- Indicates cable/port/NIC quality issues
-
-**4. Performance Variability**
-- Coefficient of Variation (CV) > 20%: Unstable performance
-- Indicates network congestion, background traffic, or hardware issues
-
-## Advanced Configuration
-
-### Customize Test Parameters
-
-Edit `iperf3_test_runner.py` in the `main()` function:
-
-```python
-def main():
-    nodes = ["220.0.0.101", "220.0.0.103", "220.0.0.104", "220.0.0.106"]
-    
-    duration = 600    # Increase test duration (seconds)
-    threads = 32      # Increase parallel streams for more cores
+### Option C: Submit without waiting
+```bash
+python3 orchestrate.py --submit-only
+```
+Then later check results:
+```bash
+squeue -u root
+python3 bottleneck_analyzer.py
 ```
 
-### Use Default SSH User
+## Results
 
-Edit line 20 in `iperf3_test_runner.py`:
+All results are saved under `results/<run_id>/` where run_id is a timestamp (e.g., `20260401_143045`)
 
-```python
-self.ssh_user = "ubuntu"  # or "centos", "ec2-user", etc.
+### Key Output Files
+- **summary.json** - Structured KPI data (machine-readable)
+- **kpi_report.txt** - Formatted tables with bottleneck analysis
+- **raw/** - Raw iperf3 JSON outputs, ethtool stats, dmesg, lspci info
+
+### Example Report Output
+```
+============================================================
+SLURM IPERF3 KPI REPORT
+============================================================
+Summary source : results/20260401_143045/summary.json
+Generated at   : 2026-04-01T14:30:45.123456
+Pairs tested   : 12
+Avg Agg Gbps   : 185.45
+Min/Max Agg    : 175.23 / 195.67
+
+Bandwidth vs Expected
++-----------------------------------+--------+--------+--------+----------+-------+----------+----------+---------+-----------+-----------+---------+---------------+
+| Path                              | TX Gbps| RX Gbps| Agg Gbps| Expected | % Exp | CPU Host%| CPU Rem% |Retrans  | UDP Jit ms| UDP Lost%| Ping ms | Bottleneck    |
++-----------------------------------+--------+--------+--------+----------+-------+----------+----------+---------+-----------+-----------+---------+---------------+
+| sc00901112s0101->sc00901112s0103  |  98.2  |  87.3  |  185.5  |  400.0   | 46.4% |  42.5    |  38.2    |    0    |   0.045   |   0.0    |  0.350  | fabric_or_nic |
+| sc00901112s0101->sc00901112s0104  |  92.1  |  89.7  |  181.8  |  400.0   | 45.5% |  38.2    |  36.1    |    0    |   0.051   |   0.0    |  0.362  | fabric_or_nic |
+...
+
+Node-level Error Signatures
++-----------------------------------+----------+-----------+-------------+-----------+
+| Node                              | PCIe/AER | Net Stack | Iface Errors| Ring Over |
++-----------------------------------+----------+-----------+-------------+-----------+
+| sc00901112s0101                   |    0     |     0     |      0      |     0     |
+| sc00901112s0103                   |    0     |     0      |      0      |     0     |
+| sc00901112s0104                   |    0     |     0      |      0      |     0     |
+| sc00901112s0106                   |    0     |     0      |      0      |     0     |
++-----------------------------------+----------+-----------+-------------+-----------+
+
+Top Findings
+1. All paths are below 80% of expected bidirectional throughput.
+2. Likely bottleneck is fabric/NIC PHY given low CPU utilization.
 ```
 
-### Use SSH Key
+## Understanding the Report
 
-Add SSH key configuration:
+### Bandwidth vs Expected Table
 
-```python
-self.ssh_key = "/home/user/.ssh/id_rsa"  # Path to private key
-# Then update SSH commands to use: ssh -i {self.ssh_key}
-```
+| Column | Meaning | What to Look For |
+|--------|---------|------------------|
+| **Path** | Source → Destination node | N/A |
+| **TX Gbps** | Transmit throughput | Higher is better; ideally ~200 Gbps |
+| **RX Gbps** | Receive throughput | Higher is better; ideally ~200 Gbps |
+| **Agg Gbps** | TX + RX aggregate | Target: 400 Gbps (200G each direction) |
+| **Expected** | Target bidirectional throughput | 400 Gbps (2 × 200 Gbps links) |
+| **% Exp** | Percent of expected | 80-100% = good; <80% = investigate |
+| **CPU Host%** | CPU utilization on sender | <85% = CPU not bottleneck |
+| **CPU Rem%** | CPU utilization on receiver | <85% = CPU not bottleneck |
+| **Retrans** | TCP retransmissions | 0 = no packet loss; >1000 = congestion |
+| **UDP Jit ms** | UDP jitter (variation in latency) | <0.1 ms = excellent; >1 ms = unstable |
+| **UDP Lost%** | UDP packet loss | 0% = perfect; >0.5% = congestion/errors |
+| **Ping ms** | ICMP round-trip latency | <1 ms = excellent; >2 ms = suspect |
+| **Bottleneck** | Identified constraint | cpu_or_kernel_stack, packet_loss_or_congestion, fabric_or_nic_limit, none |
+
+### Bottleneck Classification
+
+- **none** - Path is performing well (≥80% expected, no errors)
+- **cpu_or_kernel_stack** - CPU >85% on host/remote; tune kernel or increase nodes
+- **packet_loss_or_congestion** - High retransmits; check for network congestion/errors
+- **fabric_or_nic_limit** - Low throughput despite low CPU; NIC or fabric is limiting factor
+
+### Node-level Error Signatures
+
+Error counts from dmesg, ethtool stats, and interface counters post-run:
+- **PCIe/AER** - PCIe Advanced Error Reporting (AER) events
+- **Net Stack** - Kernel network stack errors (timeouts, watchdog, resets)
+- **Iface Errors** - NIC interface errors (rx_errors, tx_errors, dropped, overrun)
+- **Ring Over** - TX/RX ring buffer overflows
+
+**Expected**: All zeros. Non-zero indicates hardware/driver issues.
 
 ## Troubleshooting
 
-### Issue: "Nodes are not reachable"
-
+### Job won't submit: "sbatch not found"
 ```bash
-# Check network connectivity
-ping 220.0.0.101
-ping 220.0.0.103
-ping 220.0.0.104
-ping 220.0.0.106
-
-# Check SSH access
-ssh root@220.0.0.101 "hostname"
+which sbatch
+# If empty, check Slurm installation
+sinfo --version
 ```
 
-### Issue: "JSON parse error" / No test results
-
-Ensure iperf3 is installed on nodes:
-
+### Job fails: "No test results collected"
+Check the Slurm output log:
 ```bash
-# On each node:
-apt-get install -y iperf3        # Ubuntu/Debian
-yum install -y iperf3            # RHEL/CentOS
-dnf install -y iperf3            # Fedora
-
-# Verify
-iperf3 -v
+cat results/*/slurm_job.sh
+# Examine the raw iperf3 outputs
+cat results/*/raw/*_tcp.stderr
+cat results/*/raw/*_udp.stderr
 ```
 
-### Issue: Very low throughput (< 10 Gbps)
-
-1. Check network physically: inspect cables, ports, switch
-2. Verify NIC drivers on nodes: `ethtool -i eth0`
-3. Check for physical link issues: `ethtool eth0`
-4. Verify no blocker: `sudo tcpdump -i eth0 src 220.0.0.101`
-
-### Issue: High CPU but low throughput
-
-Enable NIC offloading:
-
+### Very low throughput reported
+Check if tuning applied correctly:
 ```bash
-# On each node
-ethtool -K eth0 tso on gso on lro on
-ethtool -K eth0 rx-checksum on
-
-# Verify
-ethtool -k eth0
+# Inspect what was attempted
+cat results/*/raw/sc00901112s0101_post/ethtool_features.txt
+cat results/*/raw/sc00901112s0101_post/ethtool_ring.txt
 ```
 
-## Performance Baseline
-
-For 100GbE connections with well-tuned systems:
-
-| Throughput | Interpretation |
-|------------|-----------------|
-| 95-100 Gbps | Excellent - saturating 100GbE link |
-| 80-95 Gbps | Very good - minimal packet loss/retransmit |
-| 60-80 Gbps | Good - some CPU or tuning overhead |
-| < 60 Gbps | Investigate for bottlenecks |
-
-For 160-core systems with proper tuning:
-
-| CPU Usage | Interpretation |
-|-----------|-----------------|
-| < 20% | Very low - underutilized |
-| 20-40% | Normal - good efficiency |
-| 40-70% | Moderate - acceptable load |
-| > 80% | High - potential bottleneck |
-
-## Example Scenarios
-
-### Scenario 1: Perfect Network
-
-```
-Average Throughput: 96.50 Gbps
-Consistency: 2.1% (excellent)
-Client CPU: 35.2% (good)
-Asymmetry: < 2% (symmetric)
-Result: ✓ Network is performing optimally
-```
-
-### Scenario 2: CPU-Limited
-
-```
-Average Throughput: 52.30 Gbps
-Client CPU: 95.2% (saturated)
-Server CPU: 88.5% (saturated)
-Result: ✗ CPU bottleneck - optimize application or use more nodes
-```
-
-### Scenario 3: Asymmetric Paths
-
-```
-Path 220.0.0.101→220.0.0.103: 92.1 Gbps
-Path 220.0.0.103→220.0.0.101: 45.3 Gbps
-Difference: 47% (high asymmetry)
-Result: ✗ Check link quality, routing, or NIC settings
-```
-
-## Support & Additional Testing
-
-For extended testing beyond this suite:
-
+### Network stack errors in report
+Run diagnostic on single node first:
 ```bash
-# Detailed traffic analysis
-sudo tcpdump -i eth0 -w capture.pcap dst 220.0.0.103
+python3 diagnostic.py
+```
 
-# System performance profiling
-perf stat iperf3 -c 220.0.0.103 -t 10
+### Can't generate report: "No summary.json found"
+Wait for Slurm job to complete:
+```bash
+squeue -u root
+# Once job completes (not in queue), run:
+python3 bottleneck_analyzer.py
+```
 
-# Detailed network metrics
-netstat -i
-ethtool -S eth0
-cat /proc/net/dev
+## Advanced Usage
+
+### Specify a different NIC interface
+```bash
+python3 orchestrate.py --interface eno1
+```
+
+### Run longer test for stability
+```bash
+python3 orchestrate.py --duration 600 --time-limit 02:00:00
+```
+
+### Use more parallel streams for saturating NICs
+```bash
+python3 orchestrate.py --streams 128
+```
+
+### Custom Slurm parameters
+Edit `iperf3_test_runner.py` line 87-92 to add extra Slurm directives:
+```python
+#SBATCH --exclusive     # Request exclusive node access
+#SBATCH --ntasks-per-node=1
+```
+
+## Expected Performance Baseline
+
+For 160-core nodes with 200 Gbps NICs, well-tuned systems should achieve:
+
+| Metric | Expected |
+|--------|----------|
+| Aggregate Gbps (bidirectional) | 350-400 Gbps |
+| CPU Host utilization | 20-50% |
+| CPU Remote utilization | 20-50% |
+| UDP jitter | <0.1 ms |
+| UDP packet loss | 0% |
+| Ping RTT | <0.5 ms |
+| TCP retransmits | 0 (or <100) |
+
+If you're consistently below 80% of expected, the bottleneck is likely:
+1. **Fabric/NIC PHY** - Check switch port config, cable quality
+2. **Network stack tuning** - Script applies automatically; verify it succeeded
+3. **Interrupt handling** - May need CPU affinity (not yet automated)
+4. **Background traffic** - Run during off-peak hours
+
+## Support
+
+For issues, provide the following:
+```bash
+# Check job status
+squeue -u root
+
+# Get job ID and look at Slurm output
+ls -ltr results/*/
+
+# Examine detailed errors
+cat results/latest/raw/*_tcp.stderr
+cat results/latest/raw/*_udp.stderr
+
+# View system info from post-run
+cat results/latest/raw/sc00901112s0101_post/dmesg_tail.txt
+cat results/latest/raw/sc00901112s0101_post/lspci_vv.txt
 ```
 
 ## References
 
 - [iperf3 Documentation](https://software.es.net/iperf/)
-- [Linux Networking Tuning](https://fasterdata.es.net/host-tuning/)
-- [100GbE Network Design](https://www.intel.com/content/www/us/en/networking/network-architecture-design.html)
+- [Linux Network Tuning Guide](https://fasterdata.es.net/host-tuning/)
+- [BBR Congestion Control](https://research.google/pubs/bbr-congestion-based-congestion-control/)
+- [Slurm Documentation](https://slurm.schedmd.com/sbatch.html)
 
 ---
 
-**Generated**: 2026-04-01
-**Suite Version**: 1.0
-**Test Framework**: iperf3 3.x+
+**Framework Version**: 2.0 (Slurm-native)
+**Last Updated**: 2026-04-01
+**Python Version**: 3.7+
+**iperf3 Version**: 3.0+
+**CentOS Version**: 7/8+
+**Test Nodes**: sc00901112s[0101,0103-0104,0106]
 
