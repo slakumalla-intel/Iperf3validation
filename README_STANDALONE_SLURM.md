@@ -8,6 +8,20 @@ It uses:
 - `apply_net_tuning_with_channels.sh`
 - `standalone_slurm_iperf3_kpi.sh`
 
+## Executive Summary (2026-04-03 Baseline)
+
+- Run ID: `20260403_050628` on `debug` partition, 4 nodes, `120s` tests, `8` streams.
+- Core sweep `16,32,64,96,128` delivered best average aggregate throughput at `128` cores: `306.04 Gbps`.
+- Peak single-path aggregate reached `357.39 Gbps` (`sc00901112s0103 -> 220.0.0.104`).
+- Scaling is non-monotonic (dip at `64` cores), indicating placement/queue/NUMA effects rather than CPU saturation.
+- Busy cores stayed low (roughly `4-5.3` active cores average), so CPU headroom remains available.
+- Retransmits remain high on weaker paths, and one latency outlier (`6.246 ms`) was observed at `128` cores.
+
+Immediate actions:
+- Re-run `64/96/128` core points 3 times each to establish variance.
+- At fixed `128` cores, sweep streams (`8,16,32,64`) to map throughput ceiling.
+- Correlate retransmit spikes with switch port and NIC queue counters on weak paths.
+
 ## 1. Prerequisites
 
 Run from your project directory:
@@ -131,7 +145,72 @@ Then compare:
 - best `scale_summary` entries
 - retransmits and CPU percentages
 
-## 9. Troubleshooting
+## 9. Latest Core Sweep Baseline (Run `20260403_050628`)
+
+Use this as the current reference dataset for standalone core scaling.
+
+Run metadata:
+- Partition: `debug`
+- Nodes: `sc00901112s0101 sc00901112s0103 sc00901112s0104 sc00901112s0106`
+- Duration: `120s`
+- Streams: `8`
+- Expected per direction: `200 Gbps`
+- Core steps: `16,32,64,96,128`
+- Results root: `results/20260403_050628`
+
+Execution command:
+
+```bash
+RUN_UDP=0 CORE_SCALE_LIST="1,8,16,32,48,64,72,96,128,144,192" STREAM_SCALE_LIST="1,8,16,32,48,64,72,96,128,144,192" DURATION=120 TCP_OMIT=5 ./standalone_slurm_iperf3_kpi.sh
+```
+
+Core scaling summary (from `results/20260403_050628/report.txt`):
+
+| Cores | Pairs | Avg Agg Gbps | Min Agg Gbps | Max Agg Gbps | Avg Host Cores | Avg Rem Cores |
+|------:|------:|-------------:|-------------:|-------------:|---------------:|--------------:|
+| 16    | 4     | 263.48       | 253.80       | 273.54       | 4.24           | 4.15          |
+| 32    | 4     | 282.62       | 254.10       | 317.14       | 4.81           | 4.65          |
+| 64    | 4     | 261.66       | 249.48       | 274.54       | 4.10           | 4.14          |
+| 96    | 4     | 284.86       | 260.02       | 316.56       | 4.75           | 4.65          |
+| 128   | 4     | 306.04       | 274.08       | 357.39       | 5.19           | 5.33          |
+
+Per-pair highlights:
+- Strongest path across sweeps: `sc00901112s0103 -> 220.0.0.104` (up to `357.39 Gbps` at 128 cores).
+- Weakest recurring path: `sc00901112s0106 -> 220.0.0.101` (as low as `252.52 Gbps` at 64 cores).
+- All pairs report `OK` status for all tested core budgets.
+
+### Technical Analysis (for team sharing)
+
+1. Throughput vs core budget is non-monotonic but trends upward at high core counts.
+  - Average aggregate improves from `263.48` (16c) to `306.04 Gbps` (128c), about `+16.2%`.
+  - Local dip at 64 cores (`261.66 Gbps`) suggests scheduler/NUMA/IRQ alignment effects rather than raw CPU shortage.
+
+2. Effective busy cores stay low relative to requested cores.
+  - Even with 128 requested cores, average busy cores are only about `5.19` host and `5.33` remote.
+  - This indicates the workload is not compute-saturated; performance is likely constrained by flow distribution, NIC queue handling, or fabric path quality.
+
+3. Path asymmetry remains significant.
+  - Best observed pair reaches `357.39 Gbps` while weaker links remain around `250-275 Gbps`.
+  - Recommend validating link-level parity for weaker paths (switch port counters, NIC queue stats, PCIe lane width/speed, and route consistency).
+
+4. Retransmissions are persistently high and generally increase at higher core budgets on some paths.
+  - Example: `sc00901112s0106 -> 220.0.0.101` rises to `1,595,706` retrans at 128 cores.
+  - This can mask true headroom and indicates congestion or loss domain pressure despite low ping averages.
+
+5. Latency is mostly stable, with one notable outlier.
+  - Most ping averages stay around `0.31-0.52 ms`.
+  - `sc00901112s0104 -> 220.0.0.106` at 128 cores shows `6.246 ms`, an outlier worth immediate retest and switch/NIC telemetry correlation.
+
+6. Current best operating point in this run set.
+  - For maximum observed aggregate throughput, `128 cores / 8 streams` is best in this dataset.
+  - For efficiency (`Gbps per busy core`), several mid-scale points remain competitive, so choose profile based on whether peak bandwidth or stability is the primary KPI.
+
+Recommended next validation run:
+- Keep `DURATION=120`, `TCP_OMIT=5`, and repeat `64/96/128` core points 3x for variance bands.
+- Increase stream sweep around top region (`8,16,32,64`) at fixed `128` cores.
+- Capture concurrent switch/NIC counters during run windows to map retrans spikes to specific links/queues.
+
+## 10. Troubleshooting
 
 If tuning fails:
 - Verify interface name (`IFACE`).
@@ -147,7 +226,7 @@ If workload fails:
 RUN_UDP=0 CORE_SCALE_LIST="8,16,32" STREAM_SCALE_LIST="8,16,32" DURATION=60 TCP_OMIT=3 ./standalone_slurm_iperf3_kpi.sh
 ```
 
-## 10. Minimal Daily Command Set
+## 11. Minimal Daily Command Set
 
 ```bash
 cd /root/Iperf3validation
