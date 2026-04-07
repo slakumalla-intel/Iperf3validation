@@ -6,9 +6,12 @@ NODES_CSV="${NODES_CSV:-}"
 NODE_COUNT="${NODE_COUNT:-4}"
 DURATION="${DURATION:-30}"
 STREAMS="${STREAMS:-8}"
+STREAM_SCALE_LIST="${STREAM_SCALE_LIST:-}"
 PORT_BASE="${PORT_BASE:-5201}"
 EXPECTED_GBPS_PER_DIRECTION="${EXPECTED_GBPS_PER_DIRECTION:-200}"
+CORE_SCALE_LIST="${CORE_SCALE_LIST:-}"
 CORE_STEPS="${CORE_STEPS:-16,32,64,96,128}"
+ZEROCOPY="${ZEROCOPY:-0}"
 SSH_USER="${SSH_USER:-root}"
 SSH_OPTS="${SSH_OPTS:--o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5}"
 IP_MODE="${IP_MODE:-admin}"   # admin | hostname | custom_map
@@ -26,6 +29,50 @@ mkdir -p "$RESULT_DIR" "$LOG_DIR"
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*" | tee -a "$REPORT_TXT" >&2; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"; }
+
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+normalize_csv() {
+  local input="$1"
+  local -a parts=()
+  local raw trimmed
+
+  IFS=',' read -r -a parts <<< "$input"
+  for raw in "${parts[@]}"; do
+    trimmed="$(trim "$raw")"
+    [[ -n "$trimmed" ]] && printf '%s\n' "$trimmed"
+  done
+}
+
+validate_positive_int() {
+  local value="$1"
+  local label="$2"
+
+  [[ "$value" =~ ^[0-9]+$ ]] || die "$label must be a positive integer, got '$value'"
+  (( value > 0 )) || die "$label must be greater than zero, got '$value'"
+}
+
+resolve_core_steps() {
+  if [[ -n "$CORE_SCALE_LIST" ]]; then
+    printf '%s' "$CORE_SCALE_LIST"
+  else
+    printf '%s' "$CORE_STEPS"
+  fi
+}
+
+build_iperf_client_args() {
+  local streams="$1"
+  local args="-t ${DURATION} -P ${streams} -J"
+  if [[ "$ZEROCOPY" == "1" ]]; then
+    args+=" --zerocopy"
+  fi
+  printf '%s' "$args"
+}
 
 for c in sinfo ssh python3 iperf3 ping taskset; do
   need_cmd "$c"
@@ -141,8 +188,9 @@ run_client() {
   local json_out="$4"
   local err_out="$5"
   local cpu_range="$6"
+  local streams="$7"
 
-  remote_exec "$src" "taskset -c ${cpu_range} iperf3 -c ${dst} -p ${port} -t ${DURATION} -P ${STREAMS} -J" >"$json_out" 2>"$err_out"
+  remote_exec "$src" "taskset -c ${cpu_range} iperf3 -c ${dst} -p ${port} $(build_iperf_client_args "$streams")" >"$json_out" 2>"$err_out"
   return $?
 }
 
@@ -158,6 +206,38 @@ trap cleanup_servers EXIT
 mapfile -t NODES < <(get_nodes)
 [[ "${#NODES[@]}" -eq "$NODE_COUNT" ]] || die "Expected ${NODE_COUNT} nodes, got ${#NODES[@]}"
 
+CORE_STEPS="$(resolve_core_steps)"
+mapfile -t CORE_LIST < <(normalize_csv "$CORE_STEPS")
+[[ "${#CORE_LIST[@]}" -gt 0 ]] || die "No valid core steps were provided"
+for core_value in "${CORE_LIST[@]}"; do
+  validate_positive_int "$core_value" "Core step"
+done
+
+STREAM_SWEEP_ENABLED=0
+declare -a STREAM_LIST=()
+if [[ -n "$STREAM_SCALE_LIST" ]]; then
+  mapfile -t STREAM_LIST < <(normalize_csv "$STREAM_SCALE_LIST")
+  [[ "${#STREAM_LIST[@]}" -gt 0 ]] || die "STREAM_SCALE_LIST was provided but no valid stream values were found"
+  for stream_value in "${STREAM_LIST[@]}"; do
+    validate_positive_int "$stream_value" "Stream count"
+  done
+  STREAM_SWEEP_ENABLED=1
+fi
+
+DEFAULT_STREAMS="$(trim "$STREAMS")"
+validate_positive_int "$DEFAULT_STREAMS" "STREAMS"
+
+CORE_STEPS_DISPLAY="$(IFS=,; echo "${CORE_LIST[*]}")"
+STREAM_STEPS_DISPLAY="$DEFAULT_STREAMS"
+if (( STREAM_SWEEP_ENABLED )); then
+  STREAM_STEPS_DISPLAY="$(IFS=,; echo "${STREAM_LIST[*]}")"
+fi
+
+case "$ZEROCOPY" in
+  0|1) ;;
+  *) die "ZEROCOPY must be 0 or 1, got '$ZEROCOPY'" ;;
+esac
+
 declare -A NODE_IP
 for n in "${NODES[@]}"; do
   NODE_IP["$n"]="$(node_to_ip "$n")"
@@ -171,100 +251,110 @@ done
   echo "Partition      : $PARTITION"
   echo "Nodes          : ${NODES[*]}"
   echo "Duration       : ${DURATION}s"
-  echo "Streams        : ${STREAMS}"
+  echo "Streams        : ${STREAM_STEPS_DISPLAY}"
+  echo "Zerocopy       : ${ZEROCOPY}"
   echo "Expected/dir   : ${EXPECTED_GBPS_PER_DIRECTION}.0 Gbps"
-  echo "Core steps     : ${CORE_STEPS}"
+  echo "Core steps     : ${CORE_STEPS_DISPLAY}"
   echo "Result dir     : ${RESULT_DIR}"
   echo
 } | tee "$REPORT_TXT"
 
-IFS=',' read -r -a CORE_LIST <<< "$CORE_STEPS"
-
 for req_cores_raw in "${CORE_LIST[@]}"; do
-  req_cores="$(echo "$req_cores_raw" | xargs)"
+  req_cores="$(trim "$req_cores_raw")"
   [[ -n "$req_cores" ]] || continue
 
-  SCALE_DIR="${RESULT_DIR}/cores_${req_cores}"
-  CPU_DIR="${SCALE_DIR}/cpu"
-  PING_DIR="${SCALE_DIR}/ping"
-  IPERF_DIR="${SCALE_DIR}/iperf"
-  RAW_DIR="${SCALE_DIR}/raw"
-  SUMMARY_JSON="${SCALE_DIR}/summary.json"
+  if (( STREAM_SWEEP_ENABLED )); then
+    declare -a ACTIVE_STREAM_LIST=("${STREAM_LIST[@]}")
+  else
+    declare -a ACTIVE_STREAM_LIST=("$DEFAULT_STREAMS")
+  fi
 
-  mkdir -p "$SCALE_DIR" "$CPU_DIR" "$PING_DIR" "$IPERF_DIR" "$RAW_DIR"
+  for stream_count_raw in "${ACTIVE_STREAM_LIST[@]}"; do
+    stream_count="$(trim "$stream_count_raw")"
+    [[ -n "$stream_count" ]] || continue
 
-  log "Starting core-scale test for ${req_cores} cores"
+    SCALE_DIR="${RESULT_DIR}/cores_${req_cores}/streams_${stream_count}"
+    CPU_DIR="${SCALE_DIR}/cpu"
+    PING_DIR="${SCALE_DIR}/ping"
+    IPERF_DIR="${SCALE_DIR}/iperf"
+    RAW_DIR="${SCALE_DIR}/raw"
+    SUMMARY_JSON="${SCALE_DIR}/summary.json"
 
-  declare -a META_FILES=()
+    mkdir -p "$SCALE_DIR" "$CPU_DIR" "$PING_DIR" "$IPERF_DIR" "$RAW_DIR"
 
-  for ((i=0; i<${#NODES[@]}; i++)); do
-    src="${NODES[$i]}"
-    dst_node="${NODES[$(( (i+1) % ${#NODES[@]} ))]}"
-    src_ip="${NODE_IP[$src]}"
-    dst_ip="${NODE_IP[$dst_node]}"
-    port=$((PORT_BASE + i))
-    pair_id="$(printf 'pair_%02d' "$i")"
+    log "Starting core-scale test for ${req_cores} cores with ${stream_count} streams"
 
-    cores_src="${CPU_DIR}/${pair_id}_${src}_cores.txt"
-    cores_dst="${CPU_DIR}/${pair_id}_${dst_node}_cores.txt"
+    declare -a META_FILES=()
 
-    capture_core_count "$src" "$cores_src"
-    capture_core_count "$dst_node" "$cores_dst"
+    for ((i=0; i<${#NODES[@]}; i++)); do
+      src="${NODES[$i]}"
+      dst_node="${NODES[$(( (i+1) % ${#NODES[@]} ))]}"
+      src_ip="${NODE_IP[$src]}"
+      dst_ip="${NODE_IP[$dst_node]}"
+      port=$((PORT_BASE + i))
+      pair_id="$(printf 'pair_%02d' "$i")"
 
-    src_total="$(tr -d '[:space:]' < "$cores_src" 2>/dev/null || echo 1)"
-    dst_total="$(tr -d '[:space:]' < "$cores_dst" 2>/dev/null || echo 1)"
-    [[ "$src_total" =~ ^[0-9]+$ ]] || src_total=1
-    [[ "$dst_total" =~ ^[0-9]+$ ]] || dst_total=1
+      cores_src="${CPU_DIR}/${pair_id}_${src}_cores.txt"
+      cores_dst="${CPU_DIR}/${pair_id}_${dst_node}_cores.txt"
 
-    src_used="$(clamp_core_count "$req_cores" "$src_total")"
-    dst_used="$(clamp_core_count "$req_cores" "$dst_total")"
-    src_range="$(make_cpu_range "$src_used")"
-    dst_range="$(make_cpu_range "$dst_used")"
+      capture_core_count "$src" "$cores_src"
+      capture_core_count "$dst_node" "$cores_dst"
 
-    tx_json="${IPERF_DIR}/${pair_id}_tx.json"
-    rx_json="${IPERF_DIR}/${pair_id}_rx.json"
-    tx_err="${IPERF_DIR}/${pair_id}_tx.stderr"
-    rx_err="${IPERF_DIR}/${pair_id}_rx.stderr"
-    ping_out="${PING_DIR}/${pair_id}.ping.txt"
+      src_total="$(tr -d '[:space:]' < "$cores_src" 2>/dev/null || echo 1)"
+      dst_total="$(tr -d '[:space:]' < "$cores_dst" 2>/dev/null || echo 1)"
+      [[ "$src_total" =~ ^[0-9]+$ ]] || src_total=1
+      [[ "$dst_total" =~ ^[0-9]+$ ]] || dst_total=1
 
-    cpu_src_before="${CPU_DIR}/${pair_id}_${src}_before.txt"
-    cpu_src_after="${CPU_DIR}/${pair_id}_${src}_after.txt"
-    cpu_dst_before="${CPU_DIR}/${pair_id}_${dst_node}_before.txt"
-    cpu_dst_after="${CPU_DIR}/${pair_id}_${dst_node}_after.txt"
+      src_used="$(clamp_core_count "$req_cores" "$src_total")"
+      dst_used="$(clamp_core_count "$req_cores" "$dst_total")"
+      src_range="$(make_cpu_range "$src_used")"
+      dst_range="$(make_cpu_range "$dst_used")"
 
-    srv_dst_prefix="/tmp/${pair_id}_dst_${port}_c${req_cores}"
-    srv_src_prefix="/tmp/${pair_id}_src_${port}_c${req_cores}"
+      tx_json="${IPERF_DIR}/${pair_id}_tx.json"
+      rx_json="${IPERF_DIR}/${pair_id}_rx.json"
+      tx_err="${IPERF_DIR}/${pair_id}_tx.stderr"
+      rx_err="${IPERF_DIR}/${pair_id}_rx.stderr"
+      ping_out="${PING_DIR}/${pair_id}.ping.txt"
 
-    log "Testing ${src} (${src_ip}) -> ${dst_node} (${dst_ip}) with requested cores=${req_cores}, src_range=${src_range}, dst_range=${dst_range}"
+      cpu_src_before="${CPU_DIR}/${pair_id}_${src}_before.txt"
+      cpu_src_after="${CPU_DIR}/${pair_id}_${src}_after.txt"
+      cpu_dst_before="${CPU_DIR}/${pair_id}_${dst_node}_before.txt"
+      cpu_dst_after="${CPU_DIR}/${pair_id}_${dst_node}_after.txt"
 
-    capture_cpu "$src" "$cpu_src_before"
-    capture_cpu "$dst_node" "$cpu_dst_before"
-    run_ping "$src" "$dst_ip" "$ping_out"
+      srv_dst_prefix="/tmp/${pair_id}_dst_${port}_c${req_cores}_s${stream_count}"
+      srv_src_prefix="/tmp/${pair_id}_src_${port}_c${req_cores}_s${stream_count}"
 
-    start_server "$dst_node" "$port" "$srv_dst_prefix" "$dst_range" >/dev/null
-    echo "${srv_dst_prefix}.pid ${dst_node}" >> "$SERVER_PID_FILE"
+      log "Testing ${src} (${src_ip}) -> ${dst_node} (${dst_ip}) with requested cores=${req_cores}, streams=${stream_count}, src_range=${src_range}, dst_range=${dst_range}"
 
-    set +e
-    run_client "$src" "$dst_ip" "$port" "$tx_json" "$tx_err" "$src_range"
-    tx_rc=$?
-    set -e
+      capture_cpu "$src" "$cpu_src_before"
+      capture_cpu "$dst_node" "$cpu_dst_before"
+      run_ping "$src" "$dst_ip" "$ping_out"
 
-    start_server "$src" "$port" "$srv_src_prefix" "$src_range" >/dev/null
-    echo "${srv_src_prefix}.pid ${src}" >> "$SERVER_PID_FILE"
+      start_server "$dst_node" "$port" "$srv_dst_prefix" "$dst_range" >/dev/null
+      echo "${srv_dst_prefix}.pid ${dst_node}" >> "$SERVER_PID_FILE"
 
-    set +e
-    run_client "$dst_node" "$src_ip" "$port" "$rx_json" "$rx_err" "$dst_range"
-    rx_rc=$?
-    set -e
+      set +e
+      run_client "$src" "$dst_ip" "$port" "$tx_json" "$tx_err" "$src_range" "$stream_count"
+      tx_rc=$?
+      set -e
 
-    capture_cpu "$src" "$cpu_src_after"
-    capture_cpu "$dst_node" "$cpu_dst_after"
+      start_server "$src" "$port" "$srv_src_prefix" "$src_range" >/dev/null
+      echo "${srv_src_prefix}.pid ${src}" >> "$SERVER_PID_FILE"
 
-    meta="${RAW_DIR}/${pair_id}.meta.json"
-    cat > "$meta" <<EOF
+      set +e
+      run_client "$dst_node" "$src_ip" "$port" "$rx_json" "$rx_err" "$dst_range" "$stream_count"
+      rx_rc=$?
+      set -e
+
+      capture_cpu "$src" "$cpu_src_after"
+      capture_cpu "$dst_node" "$cpu_dst_after"
+
+      meta="${RAW_DIR}/${pair_id}.meta.json"
+      cat > "$meta" <<EOF
 {
   "pair_id": "${pair_id}",
   "requested_cores": ${req_cores},
+  "requested_streams": ${stream_count},
   "src": "${src}",
   "src_ip": "${src_ip}",
   "dst_node": "${dst_node}",
@@ -294,12 +384,12 @@ for req_cores_raw in "${CORE_LIST[@]}"; do
 }
 EOF
 
-    META_FILES+=("$meta")
-  done
+      META_FILES+=("$meta")
+    done
 
-  python3 - "$SUMMARY_JSON" "$EXPECTED_GBPS_PER_DIRECTION" "${META_FILES[@]}" <<'PY'
+    python3 - "$SUMMARY_JSON" "$EXPECTED_GBPS_PER_DIRECTION" "${META_FILES[@]}" <<'PY'
 import json, os, re, sys, statistics
-from datetime import datetime
+from datetime import datetime, UTC
 
 summary_path = sys.argv[1]
 expected_per_dir = float(sys.argv[2])
@@ -423,6 +513,7 @@ for mp in meta_files:
 
     rows.append({
         "requested_cores": meta.get("requested_cores", 0),
+        "requested_streams": meta.get("requested_streams", 0),
         "src": meta["src"],
         "dst": meta["dst_ip"],
         "path": f'{meta["src"]}->{meta["dst_ip"]}',
@@ -451,8 +542,9 @@ for mp in meta_files:
 
 valid = [r for r in rows if r["agg_gbps"] > 0]
 summary = {
-    "generated_at": datetime.utcnow().isoformat(),
+    "generated_at": datetime.now(UTC).isoformat(),
     "requested_cores": rows[0]["requested_cores"] if rows else 0,
+    "requested_streams": rows[0]["requested_streams"] if rows else 0,
     "pairs_attempted": len(rows),
     "pairs_with_data": len(valid),
     "avg_agg_gbps": round(statistics.mean([r["agg_gbps"] for r in valid]), 2) if valid else 0.0,
@@ -466,7 +558,7 @@ with open(summary_path, "w") as f:
     json.dump(summary, f, indent=2)
 PY
 
-  python3 - "$SUMMARY_JSON" <<'PY' | tee -a "$REPORT_TXT"
+    python3 - "$SUMMARY_JSON" <<'PY' | tee -a "$REPORT_TXT"
 import json, sys
 s = json.load(open(sys.argv[1]))
 rows = s["rows"]
@@ -476,6 +568,7 @@ def f(x, n=2):
 
 print()
 print(f"Core Budget Summary: {s.get('requested_cores', 0)} cores")
+print(f"Streams           : {s.get('requested_streams', 0)}")
 print("Summary source :", sys.argv[1])
 print("Generated at   :", s["generated_at"])
 print("Pairs attempted:", s["pairs_attempted"])
@@ -515,6 +608,7 @@ for r in rows:
     else:
         print(f"- {r['path']}: {r['status']} | {base}, retrans={r['retransmits']}")
 PY
+  done
 
 done
 

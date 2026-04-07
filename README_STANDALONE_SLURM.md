@@ -80,21 +80,28 @@ done
 
 ## 5. Run Standalone Workload (TCP Max Throughput)
 
+Behavior notes:
+- `CORE_SCALE_LIST` now overrides the older `CORE_STEPS` default.
+- `STREAM_SCALE_LIST` is optional. If set, the script runs every listed stream count for each requested core count.
+- If `STREAM_SCALE_LIST` is not set, the script uses fixed `STREAMS` for every core point.
+- Set `ZEROCOPY=1` to add `iperf3 --zerocopy` on all TCP client runs.
+
 Recommended first run (UDP disabled):
 
 ```bash
 RUN_UDP=0 \
 CORE_SCALE_LIST="1,8,16,32,48,64,72,96,128,144,192" \
 STREAM_SCALE_LIST="1,8,16,32,48,64,72,96,128,144,192" \
-DURATION=120 TCP_OMIT=5 \
+DURATION=120 TCP_OMIT=5 ZEROCOPY=1 \
 ./standalone_slurm_iperf3_kpi.sh
 ```
 
 What this does:
 - Runs full src->dst pair matrix across all nodes.
 - Sweeps requested core counts.
-- Scales stream count with your stream list.
+- Sweeps every stream count in `STREAM_SCALE_LIST` for each requested core count.
 - Pins server/client processes with `taskset`.
+- Optionally enables `iperf3 --zerocopy`.
 - Produces per-scale and per-path KPI output.
 
 ## 6. Run with UDP KPI Enabled
@@ -106,7 +113,7 @@ RUN_UDP=1 \
 UDP_BW_G=200 UDP_DURATION=15 \
 CORE_SCALE_LIST="32,64,96,128" \
 STREAM_SCALE_LIST="32,64,96,128" \
-DURATION=120 TCP_OMIT=5 \
+DURATION=120 TCP_OMIT=5 ZEROCOPY=1 \
 ./standalone_slurm_iperf3_kpi.sh
 ```
 
@@ -137,7 +144,7 @@ Example:
 
 ```bash
 COMBINED_CHANNELS=64 ./apply_net_tuning_with_channels.sh
-RUN_UDP=0 CORE_SCALE_LIST="1,8,16,32,48,64,72,96,128,144,192" STREAM_SCALE_LIST="1,8,16,32,48,64,72,96,128,144,192" DURATION=120 TCP_OMIT=5 ./standalone_slurm_iperf3_kpi.sh
+RUN_UDP=0 CORE_SCALE_LIST="8,16,32,48,64" STREAM_SCALE_LIST="1,8,16,32,48,64" DURATION=120 TCP_OMIT=5 ZEROCOPY=1 ./standalone_slurm_iperf3_kpi.sh
 ```
 
 Then compare:
@@ -223,7 +230,7 @@ If workload fails:
 - Start with smaller scales first:
 
 ```bash
-RUN_UDP=0 CORE_SCALE_LIST="8,16,32" STREAM_SCALE_LIST="8,16,32" DURATION=60 TCP_OMIT=3 ./standalone_slurm_iperf3_kpi.sh
+RUN_UDP=0 CORE_SCALE_LIST="8,16,32" STREAMS=8 DURATION=60 TCP_OMIT=3 ./standalone_slurm_iperf3_kpi.sh
 ```
 
 ## 11. Minimal Daily Command Set
@@ -232,5 +239,5 @@ RUN_UDP=0 CORE_SCALE_LIST="8,16,32" STREAM_SCALE_LIST="8,16,32" DURATION=60 TCP_
 cd /root/Iperf3validation
 chmod +x apply_net_tuning_with_channels.sh standalone_slurm_iperf3_kpi.sh
 COMBINED_CHANNELS=64 ./apply_net_tuning_with_channels.sh
-RUN_UDP=0 CORE_SCALE_LIST="1,8,16,32,48,64,72,96,128,144,192" STREAM_SCALE_LIST="1,8,16,32,48,64,72,96,128,144,192" DURATION=120 TCP_OMIT=5 ./standalone_slurm_iperf3_kpi.sh
+RUN_UDP=0 CORE_SCALE_LIST="8,16,32,48,64" STREAM_SCALE_LIST="1,8,16,32,48,64" DURATION=120 TCP_OMIT=5 ZEROCOPY=1 ./standalone_slurm_iperf3_kpi.sh
 ```
