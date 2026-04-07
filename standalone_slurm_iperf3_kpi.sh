@@ -1,6 +1,80 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+usage() {
+  cat <<'USAGE'
+Usage: [ENV_VARS] ./standalone_slurm_iperf3_kpi.sh [--help]
+
+Runs iperf3 TCP (and optionally UDP) core/stream sweep across a set of SLURM
+nodes and produces per-scale KPI reports.
+
+Required tools on the submit node: ssh scontrol sinfo python3 iperf3 ping taskset
+
+ENVIRONMENT VARIABLES
+  Node / Cluster
+    PARTITION                   SLURM partition to use (default: debug)
+    NODES_CSV                   Comma-separated override node list, e.g. "node01,node02"
+                                  If unset, sinfo is queried for NODE_COUNT idle/mix nodes.
+    NODE_COUNT                  Number of nodes to pick from SLURM if NODES_CSV is unset (default: 4)
+    SSH_USER                    SSH login user (default: root)
+    SSH_OPTS                    Extra SSH options (default: BatchMode + StrictHostKeyChecking=no)
+    IP_MODE                     How node -> IP is resolved: admin | hostname | custom_map (default: admin)
+                                  admin: parse trailing digits from node name -> 220.0.0.<N>
+                                  hostname: use the node name directly as the IP/hostname
+                                  custom_map: pass CUSTOM_IP_MAP="node1=1.2.3.4,node2=5.6.7.8"
+    CUSTOM_IP_MAP               Comma-separated key=value map used when IP_MODE=custom_map
+
+  Core sweep (controls taskset CPU pinning)
+    CORE_SCALE_LIST             Comma-separated list of core counts to sweep, e.g. "8,16,32,64"
+                                  Overrides CORE_STEPS when set.
+    CORE_STEPS                  Fallback core list if CORE_SCALE_LIST is unset (default: 16,32,64,96,128)
+
+  Stream sweep (controls iperf3 -P)
+    STREAM_SCALE_LIST           Comma-separated list of stream counts to sweep, e.g. "1,8,16,32"
+                                  When set, every (core, stream) combination is tested.
+                                  When unset, STREAMS is used as a fixed stream count.
+    STREAMS                     Fixed stream count used when STREAM_SCALE_LIST is unset (default: 8)
+
+  iperf3 options
+    DURATION                    Test duration in seconds per direction (default: 30)
+    TCP_OMIT                    iperf3 -O omit seconds to skip TCP slow-start (default: unset)
+    ZEROCOPY                    Set to 1 to pass --zerocopy to iperf3 client (default: 0)
+    PORT_BASE                   Base TCP port; each node pair uses PORT_BASE+i (default: 5201)
+    EXPECTED_GBPS_PER_DIRECTION Expected single-direction bandwidth in Gbps (default: 200)
+
+  UDP (optional, requires RUN_UDP=1)
+    RUN_UDP                     Set to 1 to also run a UDP jitter/loss test (default: 0)
+    UDP_BW_G                    UDP target bandwidth in Gbps (default: 200)
+    UDP_DURATION                UDP test duration in seconds (default: 15)
+
+  Output
+    RESULT_ROOT                 Root directory for results (default: results)
+    RUN_ID                      Unique run identifier (default: date +%Y%m%d_%H%M%S)
+    IP_MODE                     See above
+
+EXAMPLES
+  # Quickstart: 8/16/32/48/64 cores, 1/8/16/32 streams, zerocopy enabled
+  RUN_UDP=0 CORE_SCALE_LIST="8,16,32,48,64" STREAM_SCALE_LIST="1,8,16,32" \
+    DURATION=120 TCP_OMIT=5 ZEROCOPY=1 ./standalone_slurm_iperf3_kpi.sh
+
+  # Fixed 8 streams, custom node list, 60s tests
+  NODES_CSV="sc001,sc002,sc003,sc004" STREAMS=8 CORE_SCALE_LIST="16,32,64,128" \
+    DURATION=60 TCP_OMIT=3 ./standalone_slurm_iperf3_kpi.sh
+
+  # Full sweep with UDP KPI
+  RUN_UDP=1 UDP_BW_G=200 CORE_SCALE_LIST="32,64,128" STREAM_SCALE_LIST="8,16,32" \
+    DURATION=120 TCP_OMIT=5 ZEROCOPY=1 ./standalone_slurm_iperf3_kpi.sh
+
+  # Show this help
+  ./standalone_slurm_iperf3_kpi.sh --help
+USAGE
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
 PARTITION="${PARTITION:-debug}"
 NODES_CSV="${NODES_CSV:-}"
 NODE_COUNT="${NODE_COUNT:-4}"
